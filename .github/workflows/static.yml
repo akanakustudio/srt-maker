@@ -34,8 +34,8 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
         with:
-          # Ask the action to enable GitHub Pages for this repository if it's not already enabled.
-          enablement: 'true'
+          token: ${{ secrets.PAGES_TOKEN || github.token }}
+          enablement: ${{ secrets.PAGES_TOKEN != '' }}
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
