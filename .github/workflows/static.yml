@@ -33,11 +33,14 @@ jobs:
         uses: actions/checkout@v4
       - name: Setup Pages
         uses: actions/configure-pages@v5
+        with:
+          # Ask the action to enable GitHub Pages for this repository if it's not already enabled.
+          enablement: 'true'
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload entire repository
-          path: '.'
+          # Upload the `src` directory which contains `srt-maker.html`.
+          path: 'src'
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
