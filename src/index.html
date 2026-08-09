@@ -574,6 +574,9 @@
             <option value="wave">波形</option>
             <option value="circular">サークル</option>
             <option value="dots">ドット</option>
+            <option value="led">LEDブロック</option>
+            <option value="radialDots">放射ドット</option>
+            <option value="oscilloscope">オシロスコープ</option>
           </select>
         </label>
         <label class="preview-control">
@@ -595,6 +598,30 @@
         <label class="preview-control">
           <span>グロー</span>
           <input type="range" id="eqGlow" min="0" max="1" step="0.05" value="0.4">
+        </label>
+        <label class="preview-control">
+          <span>横位置</span>
+          <select id="eqPosX">
+            <option value="left">左</option>
+            <option value="center" selected>中央</option>
+            <option value="right">右</option>
+          </select>
+        </label>
+        <label class="preview-control">
+          <span>縦位置</span>
+          <select id="eqPosY">
+            <option value="top">上</option>
+            <option value="center" selected>中央</option>
+            <option value="bottom">下</option>
+          </select>
+        </label>
+        <label class="preview-control">
+          <span>EQ幅</span>
+          <input type="range" id="eqWidth" min="10" max="100" step="5" value="100">
+        </label>
+        <label class="preview-control">
+          <span>EQ高さ</span>
+          <input type="range" id="eqHeight" min="10" max="100" step="5" value="100">
         </label>
         <button class="toggle-btn" type="button" id="eqAutoStyleBtn">曲の雰囲気から自動生成</button>
         <button class="toggle-btn" type="button" id="eqStyleSaveBtn">スタイルを保存</button>
@@ -754,6 +781,10 @@
   const eqBarCountInput = document.getElementById('eqBarCount');
   const eqSmoothingInput = document.getElementById('eqSmoothing');
   const eqGlowInput = document.getElementById('eqGlow');
+  const eqPosXSelect = document.getElementById('eqPosX');
+  const eqPosYSelect = document.getElementById('eqPosY');
+  const eqWidthInput = document.getElementById('eqWidth');
+  const eqHeightInput = document.getElementById('eqHeight');
   const eqAutoStyleBtn = document.getElementById('eqAutoStyleBtn');
   const eqStyleSaveBtn = document.getElementById('eqStyleSaveBtn');
   const eqStyleLoadInput = document.getElementById('eqStyleLoadInput');
@@ -934,17 +965,22 @@
   let audioCtx = null;
   let analyserNode = null;
   let eqDataArray = null;
+  let eqTimeDataArray = null;
   let eqEnabled = false;
   let eqRAF = null;
 
-  const EQ_TYPES = ['bars', 'mirror', 'wave', 'circular', 'dots'];
+  const EQ_TYPES = ['bars', 'mirror', 'wave', 'circular', 'dots', 'led', 'radialDots', 'oscilloscope'];
   let eqStyle = {
     type: 'bars',
     colorStart: '#7fe9db',
     colorEnd: '#33d6c0',
     barCount: 40,
     smoothing: 0.8,
-    glow: 0.4
+    glow: 0.4,
+    posX: 'center',
+    posY: 'center',
+    width: 100,
+    height: 100
   };
 
   function clamp(v, min, max){ return Math.min(max, Math.max(min, v)); }
@@ -975,8 +1011,23 @@
     analyserNode.fftSize = EQ_FFT_SIZE;
     analyserNode.smoothingTimeConstant = eqStyle.smoothing;
     eqDataArray = new Uint8Array(analyserNode.frequencyBinCount);
+    eqTimeDataArray = new Uint8Array(analyserNode.fftSize);
     sourceNode.connect(analyserNode);
     analyserNode.connect(audioCtx.destination);
+  }
+
+  function computeEqRect(cw, ch){
+    const w = cw * (eqStyle.width / 100);
+    const h = ch * (eqStyle.height / 100);
+    let x;
+    if(eqStyle.posX === 'left') x = 0;
+    else if(eqStyle.posX === 'right') x = cw - w;
+    else x = (cw - w) / 2;
+    let y;
+    if(eqStyle.posY === 'top') y = 0;
+    else if(eqStyle.posY === 'bottom') y = ch - h;
+    else y = (ch - h) / 2;
+    return { x: x, y: y, w: w, h: h };
   }
 
   function resizeEqCanvas(){
@@ -1110,22 +1161,93 @@
     }
   }
 
+  function drawEqLed(ctx, w, h){
+    const barCount = eqStyle.barCount;
+    const values = getBarValues(barCount);
+    const gap = 2;
+    const barWidth = w / barCount;
+    const segments = 14;
+    const segGap = Math.max(1, h * 0.012);
+    const segHeight = (h - segGap * (segments - 1)) / segments;
+    for(let i = 0; i < barCount; i++){
+      const lit = Math.round(values[i] * segments);
+      const x = i * barWidth;
+      for(let s = 0; s < segments; s++){
+        const y = h - (s + 1) * segHeight - s * segGap;
+        const on = s < lit;
+        let color;
+        if(!on) color = hexToRgba(eqStyle.colorEnd, 0.08);
+        else if(s >= segments - 2) color = '#ff5c5c';
+        else color = eqStyle.colorStart;
+        ctx.fillStyle = color;
+        ctx.fillRect(x + gap/2, y, Math.max(1, barWidth - gap), segHeight);
+      }
+    }
+  }
+
+  function drawEqRadialDots(ctx, w, h){
+    const barCount = eqStyle.barCount;
+    const values = getBarValues(barCount);
+    const cx = w / 2, cy = h / 2;
+    const baseRadius = Math.min(w, h) * 0.15;
+    const maxLen = Math.min(w, h) * 0.35;
+    for(let i = 0; i < barCount; i++){
+      const angle = (i / barCount) * Math.PI * 2 - Math.PI / 2;
+      const len = baseRadius + values[i] * maxLen;
+      const x = cx + Math.cos(angle) * len, y = cy + Math.sin(angle) * len;
+      const size = 3 + values[i] * 8;
+      ctx.fillStyle = i % 2 === 0 ? eqStyle.colorStart : eqStyle.colorEnd;
+      ctx.beginPath();
+      ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawEqOscilloscope(ctx, w, h){
+    const data = eqTimeDataArray;
+    const len = data.length;
+    const step = w / ((len - 1) || 1);
+    ctx.beginPath();
+    for(let i = 0; i < len; i++){
+      const v = data[i] / 128 - 1;
+      const x = i * step, y = h/2 + v * (h/2) * 0.9;
+      if(i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    const gradient = ctx.createLinearGradient(0, 0, w, 0);
+    gradient.addColorStop(0, eqStyle.colorStart);
+    gradient.addColorStop(1, eqStyle.colorEnd);
+    ctx.strokeStyle = gradient;
+    ctx.lineWidth = Math.max(2, h * 0.02);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  }
+
   function drawEq(){
     eqRAF = requestAnimationFrame(drawEq);
     if(!analyserNode) return;
-    analyserNode.getByteFrequencyData(eqDataArray);
     const ctx = previewEqCanvas.getContext('2d');
-    const w = previewEqCanvas.width, h = previewEqCanvas.height;
-    ctx.clearRect(0, 0, w, h);
+    const cw = previewEqCanvas.width, ch = previewEqCanvas.height;
+    ctx.clearRect(0, 0, cw, ch);
+    const rect = computeEqRect(cw, ch);
     ctx.save();
+    ctx.translate(rect.x, rect.y);
     ctx.shadowBlur = eqStyle.glow * 24;
     ctx.shadowColor = eqStyle.colorStart;
-    switch(eqStyle.type){
-      case 'mirror': drawEqMirror(ctx, w, h); break;
-      case 'wave': drawEqWave(ctx, w, h); break;
-      case 'circular': drawEqCircular(ctx, w, h); break;
-      case 'dots': drawEqDots(ctx, w, h); break;
-      default: drawEqBars(ctx, w, h);
+    if(eqStyle.type === 'oscilloscope'){
+      analyserNode.getByteTimeDomainData(eqTimeDataArray);
+      drawEqOscilloscope(ctx, rect.w, rect.h);
+    } else {
+      analyserNode.getByteFrequencyData(eqDataArray);
+      switch(eqStyle.type){
+        case 'mirror': drawEqMirror(ctx, rect.w, rect.h); break;
+        case 'wave': drawEqWave(ctx, rect.w, rect.h); break;
+        case 'circular': drawEqCircular(ctx, rect.w, rect.h); break;
+        case 'dots': drawEqDots(ctx, rect.w, rect.h); break;
+        case 'led': drawEqLed(ctx, rect.w, rect.h); break;
+        case 'radialDots': drawEqRadialDots(ctx, rect.w, rect.h); break;
+        default: drawEqBars(ctx, rect.w, rect.h);
+      }
     }
     ctx.restore();
   }
@@ -1175,6 +1297,10 @@
     eqBarCountInput.value = style.barCount;
     eqSmoothingInput.value = style.smoothing;
     eqGlowInput.value = style.glow;
+    eqPosXSelect.value = style.posX;
+    eqPosYSelect.value = style.posY;
+    eqWidthInput.value = style.width;
+    eqHeightInput.value = style.height;
   }
 
   function setEqStyle(style){
@@ -1194,6 +1320,10 @@
     if(analyserNode) analyserNode.smoothingTimeConstant = eqStyle.smoothing;
   });
   eqGlowInput.addEventListener('input', function(){ eqStyle.glow = parseFloat(eqGlowInput.value); });
+  eqPosXSelect.addEventListener('change', function(){ eqStyle.posX = eqPosXSelect.value; });
+  eqPosYSelect.addEventListener('change', function(){ eqStyle.posY = eqPosYSelect.value; });
+  eqWidthInput.addEventListener('input', function(){ eqStyle.width = parseInt(eqWidthInput.value, 10); });
+  eqHeightInput.addEventListener('input', function(){ eqStyle.height = parseInt(eqHeightInput.value, 10); });
 
   /* ---------- EQ style: mood auto-generation ---------- */
   const MOOD_PRESETS = [
@@ -1282,7 +1412,11 @@
       colorEnd: /^#[0-9a-fA-F]{6}$/.test(obj.colorEnd) ? obj.colorEnd : '#33d6c0',
       barCount: clamp(parseInt(obj.barCount, 10) || 40, 12, 64),
       smoothing: clamp(isNaN(parseFloat(obj.smoothing)) ? 0.8 : parseFloat(obj.smoothing), 0, 0.95),
-      glow: clamp(isNaN(parseFloat(obj.glow)) ? 0.4 : parseFloat(obj.glow), 0, 1)
+      glow: clamp(isNaN(parseFloat(obj.glow)) ? 0.4 : parseFloat(obj.glow), 0, 1),
+      posX: ['left','center','right'].indexOf(obj.posX) !== -1 ? obj.posX : 'center',
+      posY: ['top','center','bottom'].indexOf(obj.posY) !== -1 ? obj.posY : 'center',
+      width: clamp(parseInt(obj.width, 10) || 100, 10, 100),
+      height: clamp(parseInt(obj.height, 10) || 100, 10, 100)
     };
   }
 
