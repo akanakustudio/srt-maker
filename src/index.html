@@ -258,6 +258,11 @@
     border-radius:6px;padding:5px 8px;font-size:12px;width:220px;
   }
   .preview-control input[type=text]:focus{outline:none;border-color:var(--accent-dim);}
+  .preview-control input[type=number]{
+    background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:6px;padding:5px 6px;font-size:12px;width:60px;
+  }
+  .preview-control input[type=number]:focus{outline:none;border-color:var(--accent-dim);}
 
   .bg-controls{
     display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px 4px;
@@ -497,7 +502,14 @@
             <option value="m" selected>中</option>
             <option value="l">大</option>
             <option value="xl">特大</option>
+            <option value="custom">数値で指定</option>
           </select>
+        </label>
+        <label class="preview-control" id="customFontSizeRow" style="display:none">
+          <span>一行(px)</span>
+          <input type="number" id="customFontSizeSingle" min="8" max="200" step="1" value="32">
+          <span>全体(px)</span>
+          <input type="number" id="customFontSizeAll" min="8" max="120" step="1" value="14">
         </label>
         <label class="toggle-btn" for="previewBgInput">背景画像を設定</label>
         <input type="file" id="previewBgInput" accept="image/*" style="display:none">
@@ -752,6 +764,9 @@
   const previewToggleBtns = [document.getElementById('previewModeSingle'), document.getElementById('previewModeAll')];
   const previewFontFamilySelect = document.getElementById('previewFontFamily');
   const previewFontSizeSelect = document.getElementById('previewFontSize');
+  const customFontSizeRow = document.getElementById('customFontSizeRow');
+  const customFontSizeSingleInput = document.getElementById('customFontSizeSingle');
+  const customFontSizeAllInput = document.getElementById('customFontSizeAll');
   const customFontRow = document.getElementById('customFontRow');
   const customFontNameInput = document.getElementById('customFontNameInput');
   const customFontApplyBtn = document.getElementById('customFontApplyBtn');
@@ -941,10 +956,18 @@
         loadGoogleFont(name);
       }
     }
-    const size = PREVIEW_SIZES[previewFontSizeSelect.value] || PREVIEW_SIZES.m;
+    let singleSize, allSize;
+    if(previewFontSizeSelect.value === 'custom'){
+      singleSize = clamp(parseInt(customFontSizeSingleInput.value, 10) || 32, 8, 200) + 'px';
+      allSize = clamp(parseInt(customFontSizeAllInput.value, 10) || 14, 8, 120) + 'px';
+    } else {
+      const size = PREVIEW_SIZES[previewFontSizeSelect.value] || PREVIEW_SIZES.m;
+      singleSize = size.single;
+      allSize = size.all;
+    }
     previewPanel.style.setProperty('--preview-font-family', cssFamily);
-    previewPanel.style.setProperty('--preview-single-size', size.single);
-    previewPanel.style.setProperty('--preview-all-size', size.all);
+    previewPanel.style.setProperty('--preview-single-size', singleSize);
+    previewPanel.style.setProperty('--preview-all-size', allSize);
     previewPanel.style.setProperty('--preview-font-weight', fontWeightSelect.value);
     previewPanel.style.setProperty('--preview-font-style', fontItalicToggle.classList.contains('active') ? 'italic' : 'normal');
     previewPanel.style.setProperty('--preview-letter-spacing', fontLetterSpacingInput.value + 'em');
@@ -959,7 +982,13 @@
     customFontRow.style.display = previewFontFamilySelect.value === 'custom' ? 'flex' : 'none';
     applyPreviewStyle();
   });
-  previewFontSizeSelect.addEventListener('change', applyPreviewStyle);
+  previewFontSizeSelect.addEventListener('change', function(){
+    customFontSizeRow.style.display = previewFontSizeSelect.value === 'custom' ? 'flex' : 'none';
+    applyPreviewStyle();
+  });
+  [customFontSizeSingleInput, customFontSizeAllInput].forEach(function(el){
+    el.addEventListener('input', applyPreviewStyle);
+  });
   customFontApplyBtn.addEventListener('click', applyPreviewStyle);
   customFontNameInput.addEventListener('keydown', function(e){
     if(e.key === 'Enter'){ e.preventDefault(); applyPreviewStyle(); }
@@ -1476,7 +1505,7 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'eq-style.json';
+    a.download = 'eq-style' + timestampSuffix() + '.json';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1503,6 +1532,13 @@
 
   /* ===================== Helpers ===================== */
   function pad(n, len){ return String(n).padStart(len, '0'); }
+
+  function timestampSuffix(){
+    const d = new Date();
+    return '_' + String(d.getFullYear() % 100).padStart(2,'0') +
+      pad(d.getMonth()+1, 2) + pad(d.getDate(), 2) +
+      pad(d.getHours(), 2) + pad(d.getMinutes(), 2) + pad(d.getSeconds(), 2);
+  }
 
   function secToSrt(sec){
     if(sec === null || sec === undefined || isNaN(sec)) return '';
@@ -2132,7 +2168,7 @@
     const a = document.createElement('a');
     const baseName = (lyricsFileName.textContent || 'lyrics').replace(/\.[^.]+$/, '');
     a.href = url;
-    a.download = (baseName === '未選択' ? 'subtitles' : baseName) + '.srt';
+    a.download = (baseName === '未選択' ? 'subtitles' : baseName) + timestampSuffix() + '.srt';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
