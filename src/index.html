@@ -223,7 +223,7 @@
   .toggle-btn:hover{border-color:var(--accent-dim);color:var(--text);}
   .toggle-btn.active{background:var(--accent-dim);border-color:var(--accent);color:#eafffb;}
 
-  .preview-controls{display:flex;gap:16px;flex-wrap:wrap;padding:10px 16px 0;}
+  .preview-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px 0;}
   .preview-control{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);}
   .preview-control select{
     background:var(--panel2);border:1px solid var(--line);color:var(--text);
@@ -231,9 +231,23 @@
   }
   .preview-control select:focus{outline:none;border-color:var(--accent-dim);}
 
+  .preview-stage{position:relative;overflow:hidden;}
+  .preview-bg{
+    position:absolute;inset:0;z-index:0;
+    background:radial-gradient(ellipse at center, #1c2129, #14171c 80%);
+    background-size:cover;background-position:center;
+    transition:background-image .2s ease;
+  }
+  .preview-bg::after{
+    content:"";position:absolute;inset:0;background:rgba(8,10,13,0);transition:background .2s ease;
+  }
+  .preview-bg.has-image::after{background:rgba(8,10,13,.48);}
+  .preview-eq{position:absolute;inset:0;z-index:1;width:100%;height:100%;pointer-events:none;display:block;}
+
   .preview-single{
+    position:relative;z-index:2;
     min-height:140px;display:flex;align-items:center;justify-content:center;
-    padding:28px 20px;background:radial-gradient(ellipse at center, #1c2129, #14171c 80%);
+    padding:28px 20px;background:transparent;
   }
   .preview-single-text{
     font-family:var(--preview-font-family);
@@ -243,11 +257,11 @@
   }
   .preview-single-text.is-empty{color:var(--muted2);font-size:15px;font-weight:400;text-shadow:none;}
 
-  .preview-all{max-height:280px;overflow-y:auto;padding:18px 16px;}
+  .preview-all{position:relative;z-index:2;max-height:280px;overflow-y:auto;padding:18px 16px;background:transparent;}
   .preview-line{
     font-family:var(--preview-font-family);
     padding:7px 10px;font-size:var(--preview-all-size);color:var(--muted);text-align:center;border-radius:6px;
-    transition:color .15s, background .15s;line-height:1.6;
+    transition:color .15s, background .15s;line-height:1.6;text-shadow:0 1px 6px rgba(0,0,0,.5);
   }
   .preview-line.meta{color:var(--meta);font-size:11.5px;font-style:italic;margin-top:8px;}
   .preview-line.active{color:var(--accent);font-weight:700;background:rgba(51,214,192,.1);}
@@ -382,11 +396,19 @@
             <option value="xl">特大</option>
           </select>
         </label>
+        <label class="toggle-btn" for="previewBgInput">背景画像を設定</label>
+        <input type="file" id="previewBgInput" accept="image/*" style="display:none">
+        <button class="toggle-btn" type="button" id="previewBgClearBtn" disabled>背景をクリア</button>
+        <button class="toggle-btn" type="button" id="previewEqToggle">グラフィックイコライザー</button>
       </div>
-      <div class="preview-single" id="previewSingle">
-        <div class="preview-single-text is-empty" id="previewSingleText">—</div>
+      <div class="preview-stage" id="previewStage">
+        <div class="preview-bg" id="previewBg"></div>
+        <canvas class="preview-eq" id="previewEqCanvas"></canvas>
+        <div class="preview-single" id="previewSingle">
+          <div class="preview-single-text is-empty" id="previewSingleText">—</div>
+        </div>
+        <div class="preview-all" id="previewAll" style="display:none"></div>
       </div>
-      <div class="preview-all" id="previewAll" style="display:none"></div>
     </div>
 
     <div class="panel-head">
@@ -499,9 +521,16 @@
   const previewToggleBtns = [document.getElementById('previewModeSingle'), document.getElementById('previewModeAll')];
   const previewFontFamilySelect = document.getElementById('previewFontFamily');
   const previewFontSizeSelect = document.getElementById('previewFontSize');
+  const previewStage = document.getElementById('previewStage');
+  const previewBg = document.getElementById('previewBg');
+  const previewEqCanvas = document.getElementById('previewEqCanvas');
+  const previewBgInput = document.getElementById('previewBgInput');
+  const previewBgClearBtn = document.getElementById('previewBgClearBtn');
+  const previewEqToggle = document.getElementById('previewEqToggle');
   let previewMode = 'single';   // 'single' | 'all'
   let previewLineEls = {};      // idx -> element, for the "all" view
   let previewActiveIdx = -1;
+  let previewBgUrl = null;
 
   const PREVIEW_FONTS = {
     sans: "-apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', 'Segoe UI', sans-serif",
@@ -526,6 +555,103 @@
   previewFontFamilySelect.addEventListener('change', applyPreviewStyle);
   previewFontSizeSelect.addEventListener('change', applyPreviewStyle);
   applyPreviewStyle();
+
+  /* ===================== Preview background image ===================== */
+  previewBgInput.addEventListener('change', function(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    if(previewBgUrl) URL.revokeObjectURL(previewBgUrl);
+    previewBgUrl = URL.createObjectURL(file);
+    previewBg.style.backgroundImage = 'url(' + previewBgUrl + ')';
+    previewBg.classList.add('has-image');
+    previewBgClearBtn.disabled = false;
+  });
+
+  previewBgClearBtn.addEventListener('click', function(){
+    if(previewBgUrl) URL.revokeObjectURL(previewBgUrl);
+    previewBgUrl = null;
+    previewBg.style.backgroundImage = '';
+    previewBg.classList.remove('has-image');
+    previewBgClearBtn.disabled = true;
+    previewBgInput.value = '';
+  });
+
+  /* ===================== Graphic equalizer ===================== */
+  let audioCtx = null;
+  let analyserNode = null;
+  let eqDataArray = null;
+  let eqEnabled = false;
+  let eqRAF = null;
+
+  function ensureAudioGraph(){
+    if(audioCtx) return;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if(!Ctx) return;
+    audioCtx = new Ctx();
+    const sourceNode = audioCtx.createMediaElementSource(audioEl);
+    analyserNode = audioCtx.createAnalyser();
+    analyserNode.fftSize = 128;
+    analyserNode.smoothingTimeConstant = 0.8;
+    eqDataArray = new Uint8Array(analyserNode.frequencyBinCount);
+    sourceNode.connect(analyserNode);
+    analyserNode.connect(audioCtx.destination);
+  }
+
+  function resizeEqCanvas(){
+    const rect = previewEqCanvas.getBoundingClientRect();
+    previewEqCanvas.width = Math.max(1, Math.round(rect.width));
+    previewEqCanvas.height = Math.max(1, Math.round(rect.height));
+  }
+
+  function drawEq(){
+    eqRAF = requestAnimationFrame(drawEq);
+    if(!analyserNode) return;
+    analyserNode.getByteFrequencyData(eqDataArray);
+    const ctx = previewEqCanvas.getContext('2d');
+    const w = previewEqCanvas.width, h = previewEqCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+    const barCount = Math.min(40, eqDataArray.length);
+    const gap = 2;
+    const barWidth = w / barCount;
+    for(let i = 0; i < barCount; i++){
+      const value = eqDataArray[i] / 255;
+      const barHeight = value * h * 0.92;
+      const x = i * barWidth;
+      const gradient = ctx.createLinearGradient(0, h - barHeight, 0, h);
+      gradient.addColorStop(0, 'rgba(127,233,219,.95)');
+      gradient.addColorStop(1, 'rgba(51,214,192,.15)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(x + gap/2, h - barHeight, Math.max(1, barWidth - gap), barHeight);
+    }
+  }
+
+  function stopEq(){
+    if(eqRAF) cancelAnimationFrame(eqRAF);
+    eqRAF = null;
+    const ctx = previewEqCanvas.getContext('2d');
+    if(ctx) ctx.clearRect(0, 0, previewEqCanvas.width, previewEqCanvas.height);
+  }
+
+  previewEqToggle.addEventListener('click', function(){
+    if(!eqEnabled && !audioEl.src){
+      setStatus('先に音源ファイルを開いてください', 'err');
+      return;
+    }
+    eqEnabled = !eqEnabled;
+    previewEqToggle.classList.toggle('active', eqEnabled);
+    if(eqEnabled){
+      ensureAudioGraph();
+      if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+      resizeEqCanvas();
+      if(!eqRAF) drawEq();
+    } else {
+      stopEq();
+    }
+  });
+
+  window.addEventListener('resize', function(){
+    if(eqEnabled) resizeEqCanvas();
+  });
 
   /* ===================== Helpers ===================== */
   function pad(n, len){ return String(n).padStart(len, '0'); }
@@ -614,6 +740,7 @@
 
   playBtn.addEventListener('click', function(){
     if(!audioEl.src){ setStatus('先に音源ファイルを開いてください', 'err'); return; }
+    if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
     if(audioEl.paused){
       const p = audioEl.play();
       if(p && typeof p.catch === 'function'){
@@ -962,6 +1089,7 @@
       if(previewMode === 'all' && previewLineEls[previewActiveIdx]){
         previewLineEls[previewActiveIdx].scrollIntoView({block:'center'});
       }
+      if(eqEnabled) resizeEqCanvas();
     });
   });
 
