@@ -800,29 +800,75 @@
     { key:'rounded', label:'丸ゴシック（システム）', css: "'Hiragino Maru Gothic ProN', 'UD Digi Kyokasho N-R', 'Rounded Mplus 1c', sans-serif" },
     { key:'mono', label:'等幅（システム）', css: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace" }
   ];
+  // Google Fonts' Japanese-language collection, grouped by traditional type.
+  // This is a curated snapshot (not a live-fetched list — Google Fonts' metadata
+  // API requires a key and isn't reachable from a static offline page), covering
+  // the families Google Fonts lists under "Language: Japanese".
   const GOOGLE_FONTS = [
-    { name:'Noto Sans JP', label:'Noto Sans JP（ゴシック）', fallback:'sans-serif' },
-    { name:'Noto Serif JP', label:'Noto Serif JP（明朝）', fallback:'serif' },
-    { name:'M PLUS Rounded 1c', label:'M PLUS Rounded 1c（丸ゴシック）', fallback:'sans-serif' },
-    { name:'Kosugi Maru', label:'Kosugi Maru（丸ゴシック）', fallback:'sans-serif' },
-    { name:'Sawarabi Gothic', label:'Sawarabi Gothic（ゴシック）', fallback:'sans-serif' },
-    { name:'Sawarabi Mincho', label:'Sawarabi Mincho（明朝）', fallback:'serif' },
-    { name:'Shippori Mincho', label:'Shippori Mincho（明朝）', fallback:'serif' },
-    { name:'Zen Kaku Gothic New', label:'Zen Kaku Gothic New（ゴシック）', fallback:'sans-serif' },
-    { name:'Zen Maru Gothic', label:'Zen Maru Gothic（丸ゴシック）', fallback:'sans-serif' },
-    { name:'Zen Old Mincho', label:'Zen Old Mincho（明朝）', fallback:'serif' },
-    { name:'Dela Gothic One', label:'Dela Gothic One（極太）', fallback:'sans-serif' },
-    { name:'Yusei Magic', label:'Yusei Magic（手書き風）', fallback:'sans-serif' },
-    { name:'RocknRoll One', label:'RocknRoll One（ロック調）', fallback:'sans-serif' },
-    { name:'Reggae One', label:'Reggae One（ポップ）', fallback:'sans-serif' },
-    { name:'Hachi Maru Pop', label:'Hachi Maru Pop（丸文字）', fallback:'sans-serif' },
-    { name:'DotGothic16', label:'DotGothic16（ドット）', fallback:'sans-serif' },
-    { name:'Kaisei Decol', label:'Kaisei Decol（装飾明朝）', fallback:'serif' },
-    { name:'Poppins', label:'Poppins（欧文）', fallback:'sans-serif' },
-    { name:'Montserrat', label:'Montserrat（欧文）', fallback:'sans-serif' },
-    { name:'Playfair Display', label:'Playfair Display（欧文セリフ）', fallback:'serif' },
-    { name:'Bebas Neue', label:'Bebas Neue（欧文・極太見出し）', fallback:'sans-serif' },
-    { name:'Pacifico', label:'Pacifico（欧文・手書き）', fallback:'cursive' }
+    { name:'Noto Sans JP', category:'ゴシック体', fallback:'sans-serif' },
+    { name:'M PLUS 1', category:'ゴシック体', fallback:'sans-serif' },
+    { name:'M PLUS 1p', category:'ゴシック体', fallback:'sans-serif' },
+    { name:'M PLUS 2', category:'ゴシック体', fallback:'sans-serif' },
+    { name:'M PLUS 1 Code', category:'ゴシック体', fallback:'sans-serif' },
+    { name:'Kosugi', category:'ゴシック体', fallback:'sans-serif' },
+    { name:'Sawarabi Gothic', category:'ゴシック体', fallback:'sans-serif' },
+    { name:'BIZ UDGothic', category:'ゴシック体', fallback:'sans-serif' },
+    { name:'BIZ UDPGothic', category:'ゴシック体', fallback:'sans-serif' },
+    { name:'Zen Kaku Gothic New', category:'ゴシック体', fallback:'sans-serif' },
+    { name:'Zen Kaku Gothic Antique', category:'ゴシック体', fallback:'sans-serif' },
+    { name:'Zen Kurenaido', category:'ゴシック体', fallback:'sans-serif' },
+    { name:'Murecho', category:'ゴシック体', fallback:'sans-serif' },
+    { name:'IBM Plex Sans JP', category:'ゴシック体', fallback:'sans-serif' },
+
+    { name:'M PLUS Rounded 1c', category:'丸ゴシック', fallback:'sans-serif' },
+    { name:'Kosugi Maru', category:'丸ゴシック', fallback:'sans-serif' },
+    { name:'Zen Maru Gothic', category:'丸ゴシック', fallback:'sans-serif' },
+    { name:'Tsukimi Rounded', category:'丸ゴシック', fallback:'sans-serif' },
+    { name:'Kiwi Maru', category:'丸ゴシック', fallback:'sans-serif' },
+
+    { name:'Noto Serif JP', category:'明朝体', fallback:'serif' },
+    { name:'Sawarabi Mincho', category:'明朝体', fallback:'serif' },
+    { name:'BIZ UDMincho', category:'明朝体', fallback:'serif' },
+    { name:'BIZ UDPMincho', category:'明朝体', fallback:'serif' },
+    { name:'Shippori Mincho', category:'明朝体', fallback:'serif' },
+    { name:'Shippori Mincho B1', category:'明朝体', fallback:'serif' },
+    { name:'Zen Old Mincho', category:'明朝体', fallback:'serif' },
+    { name:'Hina Mincho', category:'明朝体', fallback:'serif' },
+    { name:'Kaisei Decol', category:'明朝体', fallback:'serif' },
+    { name:'Kaisei HarunoUmi', category:'明朝体', fallback:'serif' },
+    { name:'Kaisei Opti', category:'明朝体', fallback:'serif' },
+    { name:'Kaisei Tokumin', category:'明朝体', fallback:'serif' },
+    { name:'New Tegomin', category:'明朝体', fallback:'serif' },
+    { name:'Zen Antique', category:'明朝体', fallback:'serif' },
+    { name:'Zen Antique Soft', category:'明朝体', fallback:'serif' },
+    { name:'Shippori Antique', category:'明朝体', fallback:'sans-serif' },
+    { name:'Shippori Antique B1', category:'明朝体', fallback:'sans-serif' },
+    { name:'Yuji Syuku', category:'明朝体', fallback:'serif' },
+    { name:'Yuji Boku', category:'明朝体', fallback:'serif' },
+    { name:'Yuji Mai', category:'明朝体', fallback:'serif' },
+
+    { name:'Dela Gothic One', category:'ポップ・手書き・デザイン', fallback:'sans-serif', note:'極太' },
+    { name:'DotGothic16', category:'ポップ・手書き・デザイン', fallback:'sans-serif', note:'ドット' },
+    { name:'Yusei Magic', category:'ポップ・手書き・デザイン', fallback:'sans-serif', note:'手書き風' },
+    { name:'RocknRoll One', category:'ポップ・手書き・デザイン', fallback:'sans-serif', note:'ロック調' },
+    { name:'Reggae One', category:'ポップ・手書き・デザイン', fallback:'sans-serif', note:'ポップ' },
+    { name:'Rampart One', category:'ポップ・手書き・デザイン', fallback:'sans-serif', note:'立体' },
+    { name:'Stick', category:'ポップ・手書き・デザイン', fallback:'sans-serif' },
+    { name:'Train One', category:'ポップ・手書き・デザイン', fallback:'sans-serif', note:'レトロ' },
+    { name:'Hachi Maru Pop', category:'ポップ・手書き・デザイン', fallback:'sans-serif', note:'丸文字' },
+    { name:'Mochiy Pop One', category:'ポップ・手書き・デザイン', fallback:'sans-serif', note:'ポップ' },
+    { name:'Mochiy Pop P One', category:'ポップ・手書き・デザイン', fallback:'sans-serif', note:'ポップ' },
+    { name:'Yomogi', category:'ポップ・手書き・デザイン', fallback:'sans-serif', note:'手書き風' },
+    { name:'Klee One', category:'ポップ・手書き・デザイン', fallback:'sans-serif', note:'手書き風' },
+    { name:'Otomanopee One', category:'ポップ・手書き・デザイン', fallback:'sans-serif' },
+    { name:'Rock 3D', category:'ポップ・手書き・デザイン', fallback:'sans-serif', note:'立体' },
+    { name:'Potta One', category:'ポップ・手書き・デザイン', fallback:'sans-serif', note:'極太丸' },
+
+    { name:'Poppins', category:'欧文', fallback:'sans-serif' },
+    { name:'Montserrat', category:'欧文', fallback:'sans-serif' },
+    { name:'Playfair Display', category:'欧文', fallback:'serif' },
+    { name:'Bebas Neue', category:'欧文', fallback:'sans-serif' },
+    { name:'Pacifico', category:'欧文', fallback:'cursive' }
   ];
   const PREVIEW_SIZES = {
     s: { single: '22px', all: '12px' },
@@ -842,15 +888,19 @@
     });
     previewFontFamilySelect.appendChild(sysGroup);
 
-    const googleGroup = document.createElement('optgroup');
-    googleGroup.label = 'Google Fonts';
+    let googleGroup = null, currentCategory = null;
     GOOGLE_FONTS.forEach(function(f){
+      if(f.category !== currentCategory){
+        currentCategory = f.category;
+        googleGroup = document.createElement('optgroup');
+        googleGroup.label = 'Google Fonts: ' + currentCategory;
+        previewFontFamilySelect.appendChild(googleGroup);
+      }
       const opt = document.createElement('option');
       opt.value = 'google:' + f.name;
-      opt.textContent = f.label;
+      opt.textContent = f.name + (f.note ? '（' + f.note + '）' : '');
       googleGroup.appendChild(opt);
     });
-    previewFontFamilySelect.appendChild(googleGroup);
 
     const customOpt = document.createElement('option');
     customOpt.value = 'custom';
