@@ -231,6 +231,16 @@
     border-radius:6px;padding:5px 8px;font-size:12px;cursor:pointer;
   }
   .preview-control select:focus{outline:none;border-color:var(--accent-dim);}
+  .preview-control input[type=color]{
+    width:28px;height:28px;padding:0;border:1px solid var(--line);border-radius:6px;
+    background:var(--panel2);cursor:pointer;
+  }
+  .preview-control input[type=range]{width:88px;accent-color:var(--accent);}
+
+  .eq-controls{
+    display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px 4px;
+    border-top:1px dashed var(--line);margin-top:10px;
+  }
 
   .preview-stage-outer.has-ratio{
     padding:22px 16px;background:#0d0f13;display:flex;justify-content:center;
@@ -429,6 +439,42 @@
         <button class="toggle-btn" type="button" id="previewBgClearBtn" disabled>背景をクリア</button>
         <button class="toggle-btn" type="button" id="previewEqToggle">グラフィックイコライザー</button>
       </div>
+      <div class="eq-controls" id="eqControls">
+        <label class="preview-control">
+          <span>EQ種類</span>
+          <select id="eqStyleType">
+            <option value="bars">バー</option>
+            <option value="mirror">ミラーバー</option>
+            <option value="wave">波形</option>
+            <option value="circular">サークル</option>
+            <option value="dots">ドット</option>
+          </select>
+        </label>
+        <label class="preview-control">
+          <span>カラー1</span>
+          <input type="color" id="eqColorStart" value="#7fe9db">
+        </label>
+        <label class="preview-control">
+          <span>カラー2</span>
+          <input type="color" id="eqColorEnd" value="#33d6c0">
+        </label>
+        <label class="preview-control">
+          <span>密度</span>
+          <input type="range" id="eqBarCount" min="12" max="64" step="1" value="40">
+        </label>
+        <label class="preview-control">
+          <span>なめらかさ</span>
+          <input type="range" id="eqSmoothing" min="0" max="0.95" step="0.05" value="0.8">
+        </label>
+        <label class="preview-control">
+          <span>グロー</span>
+          <input type="range" id="eqGlow" min="0" max="1" step="0.05" value="0.4">
+        </label>
+        <button class="toggle-btn" type="button" id="eqAutoStyleBtn">曲の雰囲気から自動生成</button>
+        <button class="toggle-btn" type="button" id="eqStyleSaveBtn">スタイルを保存</button>
+        <label class="toggle-btn" for="eqStyleLoadInput">スタイルを読み込み</label>
+        <input type="file" id="eqStyleLoadInput" accept=".json,application/json" style="display:none">
+      </div>
       <div class="preview-stage-outer" id="previewStageOuter">
         <div class="preview-stage" id="previewStage">
           <div class="preview-bg" id="previewBg"></div>
@@ -559,6 +605,16 @@
   const previewBgClearBtn = document.getElementById('previewBgClearBtn');
   const previewEqToggle = document.getElementById('previewEqToggle');
   const previewRatioBtns = [document.getElementById('previewRatioFree'), document.getElementById('previewRatioVertical'), document.getElementById('previewRatioHorizontal')];
+  const eqStyleTypeSelect = document.getElementById('eqStyleType');
+  const eqColorStartInput = document.getElementById('eqColorStart');
+  const eqColorEndInput = document.getElementById('eqColorEnd');
+  const eqBarCountInput = document.getElementById('eqBarCount');
+  const eqSmoothingInput = document.getElementById('eqSmoothing');
+  const eqGlowInput = document.getElementById('eqGlow');
+  const eqAutoStyleBtn = document.getElementById('eqAutoStyleBtn');
+  const eqStyleSaveBtn = document.getElementById('eqStyleSaveBtn');
+  const eqStyleLoadInput = document.getElementById('eqStyleLoadInput');
+  let currentAudioFile = null;
   let previewMode = 'single';   // 'single' | 'all'
   let previewLineEls = {};      // idx -> element, for the "all" view
   let previewActiveIdx = -1;
@@ -615,6 +671,33 @@
   let eqEnabled = false;
   let eqRAF = null;
 
+  const EQ_TYPES = ['bars', 'mirror', 'wave', 'circular', 'dots'];
+  let eqStyle = {
+    type: 'bars',
+    colorStart: '#7fe9db',
+    colorEnd: '#33d6c0',
+    barCount: 40,
+    smoothing: 0.8,
+    glow: 0.4
+  };
+
+  function clamp(v, min, max){ return Math.min(max, Math.max(min, v)); }
+
+  function hexToRgba(hex, alpha){
+    let h = (hex || '').replace('#', '');
+    if(h.length === 3) h = h.split('').map(function(c){ return c + c; }).join('');
+    const n = parseInt(h, 16) || 0;
+    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+  }
+
+  function fftSizeForBarCount(barCount){
+    const needed = Math.max(32, barCount * 2);
+    let size = 32;
+    while(size < needed) size *= 2;
+    return Math.min(size, 2048);
+  }
+
   function ensureAudioGraph(){
     if(audioCtx) return;
     const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -622,17 +705,144 @@
     audioCtx = new Ctx();
     const sourceNode = audioCtx.createMediaElementSource(audioEl);
     analyserNode = audioCtx.createAnalyser();
-    analyserNode.fftSize = 128;
-    analyserNode.smoothingTimeConstant = 0.8;
+    analyserNode.fftSize = fftSizeForBarCount(eqStyle.barCount);
+    analyserNode.smoothingTimeConstant = eqStyle.smoothing;
     eqDataArray = new Uint8Array(analyserNode.frequencyBinCount);
     sourceNode.connect(analyserNode);
     analyserNode.connect(audioCtx.destination);
+  }
+
+  function applyEqFftSize(){
+    if(!analyserNode) return;
+    const size = fftSizeForBarCount(eqStyle.barCount);
+    if(analyserNode.fftSize !== size){
+      analyserNode.fftSize = size;
+      eqDataArray = new Uint8Array(analyserNode.frequencyBinCount);
+    }
   }
 
   function resizeEqCanvas(){
     const rect = previewEqCanvas.getBoundingClientRect();
     previewEqCanvas.width = Math.max(1, Math.round(rect.width));
     previewEqCanvas.height = Math.max(1, Math.round(rect.height));
+  }
+
+  function getBarValues(barCount){
+    const values = new Array(barCount);
+    const bins = eqDataArray.length;
+    const perBar = bins / barCount;
+    for(let i = 0; i < barCount; i++){
+      const start = Math.floor(i * perBar);
+      const end = Math.max(start + 1, Math.floor((i + 1) * perBar));
+      let sum = 0, cnt = 0;
+      for(let j = start; j < end && j < bins; j++){ sum += eqDataArray[j]; cnt++; }
+      values[i] = cnt ? (sum / cnt) / 255 : 0;
+    }
+    return values;
+  }
+
+  function drawEqBars(ctx, w, h){
+    const barCount = eqStyle.barCount;
+    const values = getBarValues(barCount);
+    const gap = 2;
+    const barWidth = w / barCount;
+    for(let i = 0; i < barCount; i++){
+      const barHeight = values[i] * h * 0.92;
+      const x = i * barWidth;
+      const gradient = ctx.createLinearGradient(0, h - barHeight, 0, h);
+      gradient.addColorStop(0, eqStyle.colorStart);
+      gradient.addColorStop(1, hexToRgba(eqStyle.colorEnd, 0.15));
+      ctx.fillStyle = gradient;
+      ctx.fillRect(x + gap/2, h - barHeight, Math.max(1, barWidth - gap), barHeight);
+    }
+  }
+
+  function drawEqMirror(ctx, w, h){
+    const barCount = eqStyle.barCount;
+    const values = getBarValues(barCount);
+    const gap = 2;
+    const barWidth = w / barCount;
+    const mid = h / 2;
+    for(let i = 0; i < barCount; i++){
+      const barHeight = values[i] * mid * 0.9;
+      const x = i * barWidth;
+      const gradient = ctx.createLinearGradient(0, mid - barHeight, 0, mid + barHeight);
+      gradient.addColorStop(0, hexToRgba(eqStyle.colorEnd, 0.2));
+      gradient.addColorStop(0.5, eqStyle.colorStart);
+      gradient.addColorStop(1, hexToRgba(eqStyle.colorEnd, 0.2));
+      ctx.fillStyle = gradient;
+      ctx.fillRect(x + gap/2, mid - barHeight, Math.max(1, barWidth - gap), barHeight * 2);
+    }
+  }
+
+  function drawEqWave(ctx, w, h){
+    const barCount = Math.max(8, eqStyle.barCount);
+    const values = getBarValues(barCount);
+    const stepX = w / ((barCount - 1) || 1);
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    for(let i = 0; i < barCount; i++){
+      ctx.lineTo(i * stepX, h - values[i] * h * 0.85);
+    }
+    ctx.lineTo(w, h);
+    ctx.closePath();
+    const fillGradient = ctx.createLinearGradient(0, 0, 0, h);
+    fillGradient.addColorStop(0, hexToRgba(eqStyle.colorStart, 0.85));
+    fillGradient.addColorStop(1, hexToRgba(eqStyle.colorEnd, 0.05));
+    ctx.fillStyle = fillGradient;
+    ctx.fill();
+    ctx.strokeStyle = eqStyle.colorStart;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for(let i = 0; i < barCount; i++){
+      const x = i * stepX, y = h - values[i] * h * 0.85;
+      if(i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  function drawEqCircular(ctx, w, h){
+    const barCount = eqStyle.barCount;
+    const values = getBarValues(barCount);
+    const cx = w / 2, cy = h / 2;
+    const baseRadius = Math.min(w, h) * 0.18;
+    const maxLen = Math.min(w, h) * 0.32;
+    ctx.lineWidth = Math.max(2, (Math.min(w, h) * Math.PI) / barCount * 0.5);
+    for(let i = 0; i < barCount; i++){
+      const angle = (i / barCount) * Math.PI * 2 - Math.PI / 2;
+      const len = baseRadius + values[i] * maxLen;
+      const x1 = cx + Math.cos(angle) * baseRadius, y1 = cy + Math.sin(angle) * baseRadius;
+      const x2 = cx + Math.cos(angle) * len, y2 = cy + Math.sin(angle) * len;
+      const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
+      gradient.addColorStop(0, eqStyle.colorStart);
+      gradient.addColorStop(1, eqStyle.colorEnd);
+      ctx.strokeStyle = gradient;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+  }
+
+  function drawEqDots(ctx, w, h){
+    const barCount = eqStyle.barCount;
+    const values = getBarValues(barCount);
+    const colWidth = w / barCount;
+    const dotSize = Math.max(3, colWidth * 0.35);
+    const maxDots = 10;
+    for(let i = 0; i < barCount; i++){
+      const colHeight = values[i] * h * 0.9;
+      const dots = Math.max(1, Math.round((colHeight / h) * maxDots));
+      const x = i * colWidth + colWidth / 2;
+      for(let d = 0; d < dots; d++){
+        const t = d / (maxDots - 1 || 1);
+        const y = h - t * colHeight - dotSize;
+        ctx.fillStyle = d === dots - 1 ? eqStyle.colorStart : hexToRgba(eqStyle.colorEnd, 0.5 + 0.5 * (1 - t));
+        ctx.beginPath();
+        ctx.arc(x, y, dotSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   }
 
   function drawEq(){
@@ -642,19 +852,17 @@
     const ctx = previewEqCanvas.getContext('2d');
     const w = previewEqCanvas.width, h = previewEqCanvas.height;
     ctx.clearRect(0, 0, w, h);
-    const barCount = Math.min(40, eqDataArray.length);
-    const gap = 2;
-    const barWidth = w / barCount;
-    for(let i = 0; i < barCount; i++){
-      const value = eqDataArray[i] / 255;
-      const barHeight = value * h * 0.92;
-      const x = i * barWidth;
-      const gradient = ctx.createLinearGradient(0, h - barHeight, 0, h);
-      gradient.addColorStop(0, 'rgba(127,233,219,.95)');
-      gradient.addColorStop(1, 'rgba(51,214,192,.15)');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(x + gap/2, h - barHeight, Math.max(1, barWidth - gap), barHeight);
+    ctx.save();
+    ctx.shadowBlur = eqStyle.glow * 24;
+    ctx.shadowColor = eqStyle.colorStart;
+    switch(eqStyle.type){
+      case 'mirror': drawEqMirror(ctx, w, h); break;
+      case 'wave': drawEqWave(ctx, w, h); break;
+      case 'circular': drawEqCircular(ctx, w, h); break;
+      case 'dots': drawEqDots(ctx, w, h); break;
+      default: drawEqBars(ctx, w, h);
     }
+    ctx.restore();
   }
 
   function stopEq(){
@@ -683,6 +891,158 @@
 
   window.addEventListener('resize', function(){
     if(eqEnabled) resizeEqCanvas();
+  });
+
+  /* ---------- EQ style customization ---------- */
+  function applyEqStyleToUI(style){
+    eqStyleTypeSelect.value = style.type;
+    eqColorStartInput.value = style.colorStart;
+    eqColorEndInput.value = style.colorEnd;
+    eqBarCountInput.value = style.barCount;
+    eqSmoothingInput.value = style.smoothing;
+    eqGlowInput.value = style.glow;
+  }
+
+  function setEqStyle(style){
+    eqStyle = Object.assign({}, eqStyle, style);
+    applyEqStyleToUI(eqStyle);
+    applyEqFftSize();
+    if(analyserNode) analyserNode.smoothingTimeConstant = eqStyle.smoothing;
+  }
+
+  eqStyleTypeSelect.addEventListener('change', function(){ eqStyle.type = eqStyleTypeSelect.value; });
+  eqColorStartInput.addEventListener('input', function(){ eqStyle.colorStart = eqColorStartInput.value; });
+  eqColorEndInput.addEventListener('input', function(){ eqStyle.colorEnd = eqColorEndInput.value; });
+  eqBarCountInput.addEventListener('input', function(){
+    eqStyle.barCount = parseInt(eqBarCountInput.value, 10);
+    applyEqFftSize();
+  });
+  eqSmoothingInput.addEventListener('input', function(){
+    eqStyle.smoothing = parseFloat(eqSmoothingInput.value);
+    if(analyserNode) analyserNode.smoothingTimeConstant = eqStyle.smoothing;
+  });
+  eqGlowInput.addEventListener('input', function(){ eqStyle.glow = parseFloat(eqGlowInput.value); });
+
+  /* ---------- EQ style: mood auto-generation ---------- */
+  const MOOD_PRESETS = [
+    { label:'エネルギッシュ', test: function(f){ return f.rms > 0.12 && f.dynamics > 0.5; },
+      style:{ type:'mirror', colorStart:'#ff6a3d', colorEnd:'#ffd23d', barCount:48, smoothing:0.55, glow:0.7 } },
+    { label:'シャープ・煌びやか', test: function(f){ return f.zcr > 0.09; },
+      style:{ type:'dots', colorStart:'#7fe9ff', colorEnd:'#33d6c0', barCount:56, smoothing:0.65, glow:0.6 } },
+    { label:'アンビエント・幻想的', test: function(f){ return f.rms < 0.05; },
+      style:{ type:'wave', colorStart:'#a78bfa', colorEnd:'#33d6c0', barCount:32, smoothing:0.88, glow:0.9 } },
+    { label:'重厚・落ち着き', test: function(f){ return f.dynamics < 0.35; },
+      style:{ type:'circular', colorStart:'#ff9f6a', colorEnd:'#7a3320', barCount:40, smoothing:0.82, glow:0.5 } },
+    { label:'バランス型', test: function(){ return true; },
+      style:{ type:'bars', colorStart:'#7fe9db', colorEnd:'#33d6c0', barCount:40, smoothing:0.8, glow:0.4 } }
+  ];
+
+  function pickMood(features){
+    for(let i = 0; i < MOOD_PRESETS.length; i++){
+      if(MOOD_PRESETS[i].test(features)) return MOOD_PRESETS[i];
+    }
+    return MOOD_PRESETS[MOOD_PRESETS.length - 1];
+  }
+
+  function computeAudioFeatures(buffer){
+    const ch = buffer.getChannelData(0);
+    const n = ch.length;
+    const stride = Math.max(1, Math.floor(n / 200000));
+    const windowSamples = Math.max(1, Math.floor((buffer.sampleRate * 0.1) / stride));
+    let sumSquares = 0, zeroCrossings = 0, prev = 0, count = 0;
+    let windowSum = 0, windowCount = 0;
+    const windowRms = [];
+    for(let i = 0; i < n; i += stride){
+      const v = ch[i];
+      sumSquares += v * v;
+      if((v >= 0 && prev < 0) || (v < 0 && prev >= 0)) zeroCrossings++;
+      prev = v;
+      windowSum += v * v;
+      windowCount++;
+      count++;
+      if(windowCount >= windowSamples){
+        windowRms.push(Math.sqrt(windowSum / windowCount));
+        windowSum = 0; windowCount = 0;
+      }
+    }
+    const rms = count ? Math.sqrt(sumSquares / count) : 0;
+    const zcr = count ? zeroCrossings / count : 0;
+    const meanWindowRms = windowRms.length ? windowRms.reduce(function(a,b){ return a+b; }, 0) / windowRms.length : 0;
+    const variance = windowRms.length ? windowRms.reduce(function(a,b){ return a + (b-meanWindowRms)*(b-meanWindowRms); }, 0) / windowRms.length : 0;
+    const dynamics = meanWindowRms > 0 ? Math.sqrt(variance) / meanWindowRms : 0;
+    return { rms: rms, zcr: zcr, dynamics: dynamics };
+  }
+
+  eqAutoStyleBtn.addEventListener('click', function(){
+    if(!currentAudioFile){
+      setStatus('先に音源ファイルを開いてください', 'err');
+      return;
+    }
+    ensureAudioGraph();
+    if(!audioCtx){
+      setStatus('この環境ではWeb Audio APIが利用できません', 'err');
+      return;
+    }
+    eqAutoStyleBtn.disabled = true;
+    setStatus('曲の雰囲気を解析中…', '');
+    currentAudioFile.arrayBuffer()
+      .then(function(arrayBuffer){ return audioCtx.decodeAudioData(arrayBuffer); })
+      .then(function(buffer){
+        const features = computeAudioFeatures(buffer);
+        const mood = pickMood(features);
+        setEqStyle(mood.style);
+        setStatus('曲の雰囲気を解析しました: ' + mood.label + '（音量・音の変化量・周波数傾向からの簡易推定です）', 'ok');
+      })
+      .catch(function(err){
+        setStatus('解析に失敗しました: ' + err.message, 'err');
+      })
+      .finally(function(){
+        eqAutoStyleBtn.disabled = false;
+      });
+  });
+
+  /* ---------- EQ style: save / load ---------- */
+  function sanitizeEqStyle(obj){
+    obj = obj || {};
+    return {
+      type: EQ_TYPES.indexOf(obj.type) !== -1 ? obj.type : 'bars',
+      colorStart: /^#[0-9a-fA-F]{6}$/.test(obj.colorStart) ? obj.colorStart : '#7fe9db',
+      colorEnd: /^#[0-9a-fA-F]{6}$/.test(obj.colorEnd) ? obj.colorEnd : '#33d6c0',
+      barCount: clamp(parseInt(obj.barCount, 10) || 40, 12, 64),
+      smoothing: clamp(isNaN(parseFloat(obj.smoothing)) ? 0.8 : parseFloat(obj.smoothing), 0, 0.95),
+      glow: clamp(isNaN(parseFloat(obj.glow)) ? 0.4 : parseFloat(obj.glow), 0, 1)
+    };
+  }
+
+  eqStyleSaveBtn.addEventListener('click', function(){
+    const payload = Object.assign({ _type: 'srt-maker-eq-style', version: 1 }, eqStyle);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'eq-style.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+    setStatus('EQスタイルを保存しました', 'ok');
+  });
+
+  eqStyleLoadInput.addEventListener('change', function(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(ev){
+      try{
+        const obj = JSON.parse(ev.target.result);
+        setEqStyle(sanitizeEqStyle(obj));
+        setStatus('EQスタイルを読み込みました: ' + file.name, 'ok');
+      } catch(err){
+        setStatus('EQスタイルの読み込みに失敗しました: ' + err.message, 'err');
+      }
+      eqStyleLoadInput.value = '';
+    };
+    reader.readAsText(file, 'UTF-8');
   });
 
   /* ===================== Helpers ===================== */
@@ -741,6 +1101,7 @@
     if(currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
     const url = URL.createObjectURL(file);
     currentAudioUrl = url;
+    currentAudioFile = file;
     audioEl.src = url;
     audioEl.load();
     audioFileName.textContent = file.name;
