@@ -279,6 +279,13 @@
     border-top:1px dashed var(--line);margin-top:10px;
   }
 
+  .export-controls{
+    display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px;
+    border-top:1px dashed var(--line);margin-top:10px;
+  }
+  .export-controls .hint{font-size:11.5px;color:var(--muted2);}
+  #recordVideoBtn.active{background:var(--rec-dim);border-color:var(--rec);color:#ffe3d9;}
+
   .preview-stage-outer.has-ratio{
     padding:22px 16px;background:#0d0f13;display:flex;justify-content:center;
   }
@@ -379,7 +386,7 @@
   /* ---------- Tablet ---------- */
   @media (min-width:641px) and (max-width:1179px){
     main{gap:16px;}
-    .preview-controls,.bg-controls,.font-style-controls,.eq-controls{gap:8px;}
+    .preview-controls,.bg-controls,.font-style-controls,.eq-controls,.export-controls{gap:8px;}
   }
 
   /* ---------- Mobile ---------- */
@@ -400,7 +407,7 @@
     footer{padding:10px 12px;}
     .status{width:100%;order:2;margin-right:0;}
 
-    .preview-controls,.bg-controls,.font-style-controls,.eq-controls{gap:8px;padding-left:12px;padding-right:12px;}
+    .preview-controls,.bg-controls,.font-style-controls,.eq-controls,.export-controls{gap:8px;padding-left:12px;padding-right:12px;}
     .preview-control input[type=range]{width:64px;}
     .preview-control input[type=text]{width:150px;}
     .preview-stage{height:min(38vh,280px);}
@@ -640,6 +647,10 @@
         <label class="toggle-btn" for="eqStyleLoadInput">スタイルを読み込み</label>
         <input type="file" id="eqStyleLoadInput" accept=".json,application/json" style="display:none">
       </div>
+      <div class="export-controls" id="exportControls">
+        <button class="toggle-btn" type="button" id="recordVideoBtn">プレビューを動画として保存</button>
+        <span class="hint" id="recordStatusHint"></span>
+      </div>
       <div class="preview-stage-outer" id="previewStageOuter">
         <div class="preview-stage" id="previewStage">
           <div class="preview-bg" id="previewBg"></div>
@@ -803,6 +814,8 @@
   const eqAutoStyleBtn = document.getElementById('eqAutoStyleBtn');
   const eqStyleSaveBtn = document.getElementById('eqStyleSaveBtn');
   const eqStyleLoadInput = document.getElementById('eqStyleLoadInput');
+  const recordVideoBtn = document.getElementById('recordVideoBtn');
+  const recordStatusHint = document.getElementById('recordStatusHint');
   let currentAudioFile = null;
   let previewMode = 'single';   // 'single' | 'all'
   let previewLineEls = {};      // idx -> element, for the "all" view
@@ -1021,6 +1034,14 @@
   });
   applyBgTransform();
 
+  let previewBgImageEl = null;
+  function loadPreviewBgImage(url){
+    if(!url){ previewBgImageEl = null; return; }
+    const img = new Image();
+    img.src = url;
+    previewBgImageEl = img;
+  }
+
   previewBgInput.addEventListener('change', function(e){
     const file = e.target.files[0];
     if(!file) return;
@@ -1029,6 +1050,7 @@
     previewBg.style.backgroundImage = 'url(' + previewBgUrl + ')';
     previewBg.classList.add('has-image');
     previewBgClearBtn.disabled = false;
+    loadPreviewBgImage(previewBgUrl);
   });
 
   previewBgClearBtn.addEventListener('click', function(){
@@ -1038,6 +1060,7 @@
     previewBg.classList.remove('has-image');
     previewBgClearBtn.disabled = true;
     previewBgInput.value = '';
+    loadPreviewBgImage(null);
   });
 
   /* ===================== Graphic equalizer ===================== */
@@ -1528,6 +1551,307 @@
       eqStyleLoadInput.value = '';
     };
     reader.readAsText(file, 'UTF-8');
+  });
+
+  /* ===================== Preview video export ===================== */
+  let isRecording = false;
+  let mediaRecorder = null;
+  let recordedChunks = [];
+  let recordCanvas = null;
+  let recordCtx = null;
+  let recordRAF = null;
+  let recordStreamDest = null;
+  let recordMimeType = '';
+  let themeColorsCache = null;
+
+  function getThemeColors(){
+    if(themeColorsCache) return themeColorsCache;
+    const cs = getComputedStyle(document.documentElement);
+    themeColorsCache = {
+      text: cs.getPropertyValue('--text').trim() || '#e9edf1',
+      muted: cs.getPropertyValue('--muted').trim() || '#8b93a1',
+      muted2: cs.getPropertyValue('--muted2').trim() || '#5f6773',
+      meta: cs.getPropertyValue('--meta').trim() || '#4b5563',
+      accent: cs.getPropertyValue('--accent').trim() || '#33d6c0'
+    };
+    return themeColorsCache;
+  }
+
+  function getCurrentFontConfig(){
+    const familyVar = getComputedStyle(previewPanel).getPropertyValue('--preview-font-family').trim();
+    return {
+      familyVar: familyVar || SYSTEM_FONTS[0].css,
+      weight: fontWeightSelect.value,
+      italic: fontItalicToggle.classList.contains('active'),
+      letterSpacingEm: parseFloat(fontLetterSpacingInput.value) || 0,
+      lineHeightRatio: parseFloat(fontLineHeightInput.value) || 1.5,
+      strokeWidth: parseFloat(fontStrokeWidthInput.value) || 0,
+      strokeColor: fontStrokeColorInput.value,
+      shadowColor: hexToRgba(fontShadowColorInput.value, parseFloat(fontShadowStrengthInput.value)),
+      shadowBlur: parseFloat(fontShadowStrengthInput.value) * 40
+    };
+  }
+
+  function getCurrentFontSizePx(mode){
+    if(previewFontSizeSelect.value === 'custom'){
+      return mode === 'single'
+        ? clamp(parseInt(customFontSizeSingleInput.value, 10) || 32, 8, 200)
+        : clamp(parseInt(customFontSizeAllInput.value, 10) || 14, 8, 120);
+    }
+    if(mode === 'single'){
+      return parseFloat(getComputedStyle(previewSingleText).fontSize) || 32;
+    }
+    const raw = getComputedStyle(previewPanel).getPropertyValue('--preview-all-size').trim();
+    return parseFloat(raw) || 14;
+  }
+
+  function wrapTextLines(ctx, text, maxWidth){
+    const chars = Array.from(text);
+    const lines = [];
+    let current = '';
+    chars.forEach(function(ch){
+      const test = current + ch;
+      if(current && ctx.measureText(test).width > maxWidth){
+        lines.push(current);
+        current = ch;
+      } else {
+        current = test;
+      }
+    });
+    if(current) lines.push(current);
+    return lines;
+  }
+
+  function drawCanvasBackground(ctx, w, h){
+    ctx.fillStyle = '#14171c';
+    ctx.fillRect(0, 0, w, h);
+    const img = previewBgImageEl;
+    if(!img || !img.complete || !img.naturalWidth){
+      const grad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.max(w, h) * 0.7);
+      grad.addColorStop(0, '#1c2129');
+      grad.addColorStop(1, '#14171c');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+      return;
+    }
+    const iw = img.naturalWidth, ih = img.naturalHeight;
+    const mode = bgSizeModeSelect.value;
+    let drawW, drawH;
+    if(mode === 'cover'){
+      const scale = Math.max(w / iw, h / ih);
+      drawW = iw * scale; drawH = ih * scale;
+    } else if(mode === 'auto'){
+      drawW = iw; drawH = ih;
+    } else if(mode === 'zoom'){
+      const zoom = (parseFloat(bgZoomInput.value) || 100) / 100;
+      drawW = w * zoom; drawH = drawW * (ih / iw);
+    } else {
+      const scale = Math.min(w / iw, h / ih);
+      drawW = iw * scale; drawH = ih * scale;
+    }
+    const posX = (parseFloat(bgPosXInput.value) || 50) / 100;
+    const posY = (parseFloat(bgPosYInput.value) || 50) / 100;
+    ctx.drawImage(img, (w - drawW) * posX, (h - drawH) * posY, drawW, drawH);
+    if(previewBg.classList.contains('has-image')){
+      ctx.fillStyle = 'rgba(8,10,13,.48)';
+      ctx.fillRect(0, 0, w, h);
+    }
+  }
+
+  function drawRecordSingleLine(ctx, w, h, activeIdx){
+    const theme = getThemeColors();
+    const cfg = getCurrentFontConfig();
+    const sizePx = getCurrentFontSizePx('single');
+    const line = activeIdx !== -1 ? lyricsLines[activeIdx] : null;
+    const text = line ? stripMetaTags(line.text) : '';
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if(!text){
+      ctx.font = '400 15px ' + cfg.familyVar;
+      ctx.fillStyle = theme.muted2;
+      ctx.fillText('♪', w/2, h/2);
+      ctx.restore();
+      return;
+    }
+    ctx.font = (cfg.italic ? 'italic ' : '') + cfg.weight + ' ' + sizePx + 'px ' + cfg.familyVar;
+    if('letterSpacing' in ctx) ctx.letterSpacing = (cfg.letterSpacingEm * sizePx) + 'px';
+    const lineHeight = sizePx * cfg.lineHeightRatio;
+    const lines = wrapTextLines(ctx, text, w - 40);
+    const totalH = lines.length * lineHeight;
+    let y = h/2 - totalH/2 + lineHeight/2;
+    ctx.shadowColor = cfg.shadowColor;
+    ctx.shadowBlur = cfg.shadowBlur;
+    lines.forEach(function(ln){
+      if(cfg.strokeWidth > 0){
+        ctx.lineWidth = cfg.strokeWidth * 2;
+        ctx.strokeStyle = cfg.strokeColor;
+        ctx.strokeText(ln, w/2, y);
+      }
+      ctx.fillStyle = theme.text;
+      ctx.fillText(ln, w/2, y);
+      y += lineHeight;
+    });
+    ctx.restore();
+  }
+
+  function drawRecordAllLines(ctx, w, h, activeIdx){
+    const theme = getThemeColors();
+    const cfg = getCurrentFontConfig();
+    const sizePx = getCurrentFontSizePx('all');
+    const lineHeight = sizePx * cfg.lineHeightRatio * 1.4;
+    const timeable = [];
+    lyricsLines.forEach(function(line, idx){
+      if(line.isBlank) return;
+      timeable.push({ idx: idx, line: line });
+    });
+    if(timeable.length === 0) return;
+    let activePos = timeable.findIndex(function(t){ return t.idx === activeIdx; });
+    if(activePos === -1) activePos = 0;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if('letterSpacing' in ctx) ctx.letterSpacing = (cfg.letterSpacingEm * sizePx) + 'px';
+    const centerY = h/2;
+    timeable.forEach(function(t, pos){
+      const y = centerY + (pos - activePos) * lineHeight;
+      if(y < -lineHeight || y > h + lineHeight) return;
+      const isMeta = t.line.isMeta;
+      const isActive = t.idx === activeIdx;
+      const text = isMeta ? t.line.text.trim() : (stripMetaTags(t.line.text) || ' ');
+      const fontSize = isMeta ? sizePx * 0.85 : sizePx;
+      ctx.font = ((isMeta || cfg.italic) ? 'italic ' : '') + (isMeta ? '400' : cfg.weight) + ' ' + fontSize + 'px ' + cfg.familyVar;
+      ctx.shadowBlur = 0;
+      if(isActive){
+        ctx.shadowColor = cfg.shadowColor;
+        ctx.shadowBlur = cfg.shadowBlur;
+        ctx.fillStyle = theme.accent;
+      } else if(isMeta){
+        ctx.fillStyle = theme.meta;
+      } else {
+        ctx.fillStyle = theme.muted;
+      }
+      if(!isMeta && isActive && cfg.strokeWidth > 0){
+        ctx.lineWidth = cfg.strokeWidth;
+        ctx.strokeStyle = cfg.strokeColor;
+        ctx.strokeText(text, w/2, y);
+      }
+      ctx.fillText(text, w/2, y);
+    });
+    ctx.restore();
+  }
+
+  function drawExportFrame(){
+    if(!isRecording) return;
+    recordRAF = requestAnimationFrame(drawExportFrame);
+    const w = recordCanvas.width, h = recordCanvas.height;
+    drawCanvasBackground(recordCtx, w, h);
+    recordCtx.drawImage(previewEqCanvas, 0, 0, w, h);
+    const activeIdx = getActiveLineIndex();
+    if(previewMode === 'all') drawRecordAllLines(recordCtx, w, h, activeIdx);
+    else drawRecordSingleLine(recordCtx, w, h, activeIdx);
+  }
+
+  function stopRecording(){
+    if(mediaRecorder && mediaRecorder.state !== 'inactive'){
+      mediaRecorder.stop();
+    }
+    audioEl.pause();
+  }
+
+  function startRecording(){
+    if(!audioEl.src){ setStatus('先に音源ファイルを開いてください', 'err'); return; }
+    const hasTimed = lyricsLines.some(function(l){ return !l.isMeta && !l.isBlank && l.start !== null && l.end !== null; });
+    if(!hasTimed){ setStatus('保存できる字幕行がありません（開始・終了時間が未設定です）', 'err'); return; }
+    if(typeof MediaRecorder === 'undefined' || !previewEqCanvas.captureStream){
+      setStatus('この環境では動画保存に対応していません', 'err');
+      return;
+    }
+    ensureAudioGraph();
+    if(!audioCtx){ setStatus('この環境ではWeb Audio APIが利用できません', 'err'); return; }
+
+    resizeEqCanvas();
+    const w = previewEqCanvas.width, h = previewEqCanvas.height;
+    if(!recordCanvas){
+      recordCanvas = document.createElement('canvas');
+      recordCtx = recordCanvas.getContext('2d');
+    }
+    recordCanvas.width = w;
+    recordCanvas.height = h;
+
+    if(!recordStreamDest){
+      recordStreamDest = audioCtx.createMediaStreamDestination();
+      analyserNode.connect(recordStreamDest);
+    }
+    const videoStream = recordCanvas.captureStream(30);
+    const combined = new MediaStream();
+    videoStream.getVideoTracks().forEach(function(t){ combined.addTrack(t); });
+    recordStreamDest.stream.getAudioTracks().forEach(function(t){ combined.addTrack(t); });
+
+    const mimeCandidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    recordMimeType = mimeCandidates.filter(function(m){
+      return typeof MediaRecorder.isTypeSupported === 'function' && MediaRecorder.isTypeSupported(m);
+    })[0] || '';
+
+    recordedChunks = [];
+    try{
+      mediaRecorder = recordMimeType ? new MediaRecorder(combined, {mimeType: recordMimeType}) : new MediaRecorder(combined);
+    } catch(err){
+      setStatus('動画の録画を開始できませんでした: ' + err.message, 'err');
+      return;
+    }
+
+    function handleRecordEnded(){ stopRecording(); }
+
+    mediaRecorder.ondataavailable = function(e){
+      if(e.data && e.data.size) recordedChunks.push(e.data);
+    };
+    mediaRecorder.onstop = function(){
+      isRecording = false;
+      if(recordRAF) cancelAnimationFrame(recordRAF);
+      recordRAF = null;
+      recordVideoBtn.textContent = 'プレビューを動画として保存';
+      recordVideoBtn.classList.remove('active');
+      recordStatusHint.textContent = '';
+      audioEl.removeEventListener('ended', handleRecordEnded);
+      if(recordedChunks.length === 0){
+        setStatus('録画データが空でした', 'err');
+        return;
+      }
+      const blob = new Blob(recordedChunks, {type: recordMimeType || 'video/webm'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'preview' + timestampSuffix() + '.webm';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+      setStatus('プレビュー動画を保存しました', 'ok');
+    };
+
+    audioEl.addEventListener('ended', handleRecordEnded);
+
+    isRecording = true;
+    recordVideoBtn.textContent = '録画を停止';
+    recordVideoBtn.classList.add('active');
+    setStatus('プレビューの録画を開始しました…', '');
+    audioEl.currentTime = 0;
+    if(audioCtx.state === 'suspended') audioCtx.resume();
+    audioEl.play();
+    mediaRecorder.start();
+    drawExportFrame();
+  }
+
+  recordVideoBtn.addEventListener('click', function(){
+    if(isRecording) stopRecording();
+    else startRecording();
+  });
+
+  audioEl.addEventListener('timeupdate', function(){
+    if(isRecording){
+      recordStatusHint.textContent = '録画中: ' + fmtClock(audioEl.currentTime) + ' / ' + fmtClock(audioEl.duration || 0);
+    }
   });
 
   /* ===================== Helpers ===================== */
