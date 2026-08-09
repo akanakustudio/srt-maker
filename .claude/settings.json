@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e ' *)",
+      "Bash(git commit -m ' *)",
+      "Bash(node --check /tmp/check7.js)",
+      "Bash(node --check /tmp/check8.js)"
+    ]
+  }
+}
