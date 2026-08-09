@@ -241,6 +241,11 @@
   .toggle-btn:hover{border-color:var(--accent-dim);color:var(--text);}
   .toggle-btn.active{background:var(--accent-dim);border-color:var(--accent);color:#eafffb;}
 
+  .style-io-controls{
+    display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px 0;
+  }
+  .style-io-controls .hint{font-size:11px;color:var(--muted2);}
+
   .preview-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px 0;}
   .preview-control{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);}
   .preview-control select{
@@ -386,7 +391,7 @@
   /* ---------- Tablet ---------- */
   @media (min-width:641px) and (max-width:1179px){
     main{gap:16px;}
-    .preview-controls,.bg-controls,.font-style-controls,.eq-controls,.export-controls{gap:8px;}
+    .style-io-controls,.preview-controls,.bg-controls,.font-style-controls,.eq-controls,.export-controls{gap:8px;}
   }
 
   /* ---------- Mobile ---------- */
@@ -407,7 +412,7 @@
     footer{padding:10px 12px;}
     .status{width:100%;order:2;margin-right:0;}
 
-    .preview-controls,.bg-controls,.font-style-controls,.eq-controls,.export-controls{gap:8px;padding-left:12px;padding-right:12px;}
+    .style-io-controls,.preview-controls,.bg-controls,.font-style-controls,.eq-controls,.export-controls{gap:8px;padding-left:12px;padding-right:12px;}
     .preview-control input[type=range]{width:64px;}
     .preview-control input[type=text]{width:150px;}
     .preview-stage{height:min(38vh,280px);}
@@ -492,6 +497,12 @@
             <button class="toggle-btn" type="button" id="previewRatioHorizontal" data-ratio="horizontal">横動画 (16:9)</button>
           </div>
         </div>
+      </div>
+      <div class="style-io-controls" id="styleIoControls">
+        <button class="toggle-btn" type="button" id="previewStyleSaveBtn">プレビュー設定を保存</button>
+        <label class="toggle-btn" for="previewStyleLoadInput">プレビュー設定を読み込み</label>
+        <input type="file" id="previewStyleLoadInput" accept=".json,application/json" style="display:none">
+        <span class="hint">フォント・背景・グラフィックイコライザーなど、歌詞プレビューの設定一式を保存/読み込みします（背景画像そのものは含みません）</span>
       </div>
       <div class="preview-controls">
         <label class="preview-control">
@@ -643,9 +654,6 @@
           <input type="range" id="eqHeight" min="10" max="100" step="5" value="100">
         </label>
         <button class="toggle-btn" type="button" id="eqAutoStyleBtn">曲の雰囲気から自動生成</button>
-        <button class="toggle-btn" type="button" id="eqStyleSaveBtn">スタイルを保存</button>
-        <label class="toggle-btn" for="eqStyleLoadInput">スタイルを読み込み</label>
-        <input type="file" id="eqStyleLoadInput" accept=".json,application/json" style="display:none">
       </div>
       <div class="export-controls" id="exportControls">
         <button class="toggle-btn" type="button" id="recordVideoBtn">プレビューを動画として保存</button>
@@ -772,7 +780,9 @@
   const previewSingle = document.getElementById('previewSingle');
   const previewSingleText = document.getElementById('previewSingleText');
   const previewAll = document.getElementById('previewAll');
-  const previewToggleBtns = [document.getElementById('previewModeSingle'), document.getElementById('previewModeAll')];
+  const previewModeSingleBtn = document.getElementById('previewModeSingle');
+  const previewModeAllBtn = document.getElementById('previewModeAll');
+  const previewToggleBtns = [previewModeSingleBtn, previewModeAllBtn];
   const previewFontFamilySelect = document.getElementById('previewFontFamily');
   const previewFontSizeSelect = document.getElementById('previewFontSize');
   const customFontSizeRow = document.getElementById('customFontSizeRow');
@@ -800,7 +810,10 @@
   const bgPosXInput = document.getElementById('bgPosX');
   const bgPosYInput = document.getElementById('bgPosY');
   const previewEqToggle = document.getElementById('previewEqToggle');
-  const previewRatioBtns = [document.getElementById('previewRatioFree'), document.getElementById('previewRatioVertical'), document.getElementById('previewRatioHorizontal')];
+  const previewRatioFreeBtn = document.getElementById('previewRatioFree');
+  const previewRatioVerticalBtn = document.getElementById('previewRatioVertical');
+  const previewRatioHorizontalBtn = document.getElementById('previewRatioHorizontal');
+  const previewRatioBtns = [previewRatioFreeBtn, previewRatioVerticalBtn, previewRatioHorizontalBtn];
   const eqStyleTypeSelect = document.getElementById('eqStyleType');
   const eqColorStartInput = document.getElementById('eqColorStart');
   const eqColorEndInput = document.getElementById('eqColorEnd');
@@ -812,8 +825,8 @@
   const eqWidthInput = document.getElementById('eqWidth');
   const eqHeightInput = document.getElementById('eqHeight');
   const eqAutoStyleBtn = document.getElementById('eqAutoStyleBtn');
-  const eqStyleSaveBtn = document.getElementById('eqStyleSaveBtn');
-  const eqStyleLoadInput = document.getElementById('eqStyleLoadInput');
+  const previewStyleSaveBtn = document.getElementById('previewStyleSaveBtn');
+  const previewStyleLoadInput = document.getElementById('previewStyleLoadInput');
   const recordVideoBtn = document.getElementById('recordVideoBtn');
   const recordStatusHint = document.getElementById('recordStatusHint');
   let currentAudioFile = null;
@@ -1119,16 +1132,24 @@
   }
 
   function computeEqRect(cw, ch){
-    const w = cw * (eqStyle.width / 100);
-    const h = ch * (eqStyle.height / 100);
+    // Reserve room on every side for the shadowBlur glow (plus a small fixed
+    // margin) so bars sitting at the edge of a full-bleed rect don't get their
+    // glow abruptly clipped by the canvas boundary — without this, a 100%-width
+    // rect puts the last bar flush against x=cw, leaving nowhere for its glow
+    // to render, which reads as the right (or left/top/bottom) edge being cut off.
+    const margin = 4 + eqStyle.glow * 24;
+    const availW = Math.max(1, cw - margin * 2);
+    const availH = Math.max(1, ch - margin * 2);
+    const w = availW * (eqStyle.width / 100);
+    const h = availH * (eqStyle.height / 100);
     let x;
-    if(eqStyle.posX === 'left') x = 0;
-    else if(eqStyle.posX === 'right') x = cw - w;
-    else x = (cw - w) / 2;
+    if(eqStyle.posX === 'left') x = margin;
+    else if(eqStyle.posX === 'right') x = cw - margin - w;
+    else x = margin + (availW - w) / 2;
     let y;
-    if(eqStyle.posY === 'top') y = 0;
-    else if(eqStyle.posY === 'bottom') y = ch - h;
-    else y = (ch - h) / 2;
+    if(eqStyle.posY === 'top') y = margin;
+    else if(eqStyle.posY === 'bottom') y = ch - margin - h;
+    else y = margin + (availH - h) / 2;
     return { x: x, y: y, w: w, h: h };
   }
 
@@ -1522,33 +1543,126 @@
     };
   }
 
-  eqStyleSaveBtn.addEventListener('click', function(){
-    const payload = Object.assign({ _type: 'srt-maker-eq-style', version: 1 }, eqStyle);
+  /* ---------- Preview settings (all): save / load ---------- */
+  function clampInputValue(inputEl, val, fallback){
+    const num = parseFloat(val);
+    if(isNaN(num)) return fallback;
+    const min = parseFloat(inputEl.min);
+    const max = parseFloat(inputEl.max);
+    return clamp(num, isNaN(min) ? -Infinity : min, isNaN(max) ? Infinity : max);
+  }
+
+  function getFullPreviewSettings(){
+    let ratio = 'free';
+    if(previewStage.classList.contains('ratio-vertical')) ratio = 'vertical';
+    else if(previewStage.classList.contains('ratio-horizontal')) ratio = 'horizontal';
+    return {
+      _type: 'srt-maker-preview-style',
+      version: 1,
+      previewMode: previewMode,
+      previewRatio: ratio,
+      font: {
+        family: previewFontFamilySelect.value,
+        customFontName: customFontNameInput.value,
+        size: previewFontSizeSelect.value,
+        customSizeSingle: customFontSizeSingleInput.value,
+        customSizeAll: customFontSizeAllInput.value,
+        weight: fontWeightSelect.value,
+        italic: fontItalicToggle.classList.contains('active'),
+        letterSpacing: fontLetterSpacingInput.value,
+        lineHeight: fontLineHeightInput.value,
+        strokeWidth: fontStrokeWidthInput.value,
+        strokeColor: fontStrokeColorInput.value,
+        shadowColor: fontShadowColorInput.value,
+        shadowStrength: fontShadowStrengthInput.value
+      },
+      background: {
+        sizeMode: bgSizeModeSelect.value,
+        zoom: bgZoomInput.value,
+        posX: bgPosXInput.value,
+        posY: bgPosYInput.value
+      },
+      eq: eqStyle
+    };
+  }
+
+  function applyFullPreviewSettings(obj){
+    obj = obj || {};
+
+    if(obj.previewMode === 'all') previewModeAllBtn.click();
+    else if(obj.previewMode === 'single') previewModeSingleBtn.click();
+
+    const ratioBtnMap = { free: previewRatioFreeBtn, vertical: previewRatioVerticalBtn, horizontal: previewRatioHorizontalBtn };
+    if(ratioBtnMap[obj.previewRatio]) ratioBtnMap[obj.previewRatio].click();
+
+    const font = obj.font || {};
+    const familyOptionExists = Array.prototype.some.call(previewFontFamilySelect.options, function(o){ return o.value === font.family; });
+    if(typeof font.customFontName === 'string') customFontNameInput.value = font.customFontName;
+    if(familyOptionExists){
+      previewFontFamilySelect.value = font.family;
+      previewFontFamilySelect.dispatchEvent(new Event('change'));
+    }
+    const sizeOptionExists = Array.prototype.some.call(previewFontSizeSelect.options, function(o){ return o.value === font.size; });
+    if(typeof font.customSizeSingle !== 'undefined') customFontSizeSingleInput.value = clampInputValue(customFontSizeSingleInput, font.customSizeSingle, customFontSizeSingleInput.value);
+    if(typeof font.customSizeAll !== 'undefined') customFontSizeAllInput.value = clampInputValue(customFontSizeAllInput, font.customSizeAll, customFontSizeAllInput.value);
+    if(sizeOptionExists){
+      previewFontSizeSelect.value = font.size;
+      previewFontSizeSelect.dispatchEvent(new Event('change'));
+    }
+    if(['100','300','400','500','700','900'].indexOf(font.weight) !== -1){
+      fontWeightSelect.value = font.weight;
+      fontWeightSelect.dispatchEvent(new Event('change'));
+    }
+    if(fontItalicToggle.classList.contains('active') !== !!font.italic){
+      fontItalicToggle.classList.toggle('active', !!font.italic);
+    }
+    if(typeof font.letterSpacing !== 'undefined') fontLetterSpacingInput.value = clampInputValue(fontLetterSpacingInput, font.letterSpacing, fontLetterSpacingInput.value);
+    if(typeof font.lineHeight !== 'undefined') fontLineHeightInput.value = clampInputValue(fontLineHeightInput, font.lineHeight, fontLineHeightInput.value);
+    if(typeof font.strokeWidth !== 'undefined') fontStrokeWidthInput.value = clampInputValue(fontStrokeWidthInput, font.strokeWidth, fontStrokeWidthInput.value);
+    if(/^#[0-9a-fA-F]{6}$/.test(font.strokeColor)) fontStrokeColorInput.value = font.strokeColor;
+    if(/^#[0-9a-fA-F]{6}$/.test(font.shadowColor)) fontShadowColorInput.value = font.shadowColor;
+    if(typeof font.shadowStrength !== 'undefined') fontShadowStrengthInput.value = clampInputValue(fontShadowStrengthInput, font.shadowStrength, fontShadowStrengthInput.value);
+
+    const bg = obj.background || {};
+    const bgModeOptionExists = Array.prototype.some.call(bgSizeModeSelect.options, function(o){ return o.value === bg.sizeMode; });
+    if(typeof bg.zoom !== 'undefined') bgZoomInput.value = clampInputValue(bgZoomInput, bg.zoom, bgZoomInput.value);
+    if(typeof bg.posX !== 'undefined') bgPosXInput.value = clampInputValue(bgPosXInput, bg.posX, bgPosXInput.value);
+    if(typeof bg.posY !== 'undefined') bgPosYInput.value = clampInputValue(bgPosYInput, bg.posY, bgPosYInput.value);
+    if(bgModeOptionExists) bgSizeModeSelect.value = bg.sizeMode;
+    applyBgTransform();
+
+    applyPreviewStyle();
+
+    setEqStyle(sanitizeEqStyle(obj.eq));
+  }
+
+  previewStyleSaveBtn.addEventListener('click', function(){
+    const payload = getFullPreviewSettings();
     const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'eq-style' + timestampSuffix() + '.json';
+    a.download = 'preview-style' + timestampSuffix() + '.json';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
-    setStatus('EQスタイルを保存しました', 'ok');
+    setStatus('プレビュー設定を保存しました', 'ok');
   });
 
-  eqStyleLoadInput.addEventListener('change', function(e){
+  previewStyleLoadInput.addEventListener('change', function(e){
     const file = e.target.files[0];
     if(!file) return;
     const reader = new FileReader();
     reader.onload = function(ev){
       try{
         const obj = JSON.parse(ev.target.result);
-        setEqStyle(sanitizeEqStyle(obj));
-        setStatus('EQスタイルを読み込みました: ' + file.name, 'ok');
+        applyFullPreviewSettings(obj);
+        setStatus('プレビュー設定を読み込みました: ' + file.name, 'ok');
       } catch(err){
-        setStatus('EQスタイルの読み込みに失敗しました: ' + err.message, 'err');
+        setStatus('プレビュー設定の読み込みに失敗しました: ' + err.message, 'err');
       }
-      eqStyleLoadInput.value = '';
+      previewStyleLoadInput.value = '';
     };
     reader.readAsText(file, 'UTF-8');
   });
