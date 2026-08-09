@@ -213,6 +213,14 @@
     --preview-font-family: var(--sans);
     --preview-single-size: clamp(20px,4vw,34px);
     --preview-all-size: 14px;
+    --preview-font-weight: 700;
+    --preview-font-style: normal;
+    --preview-letter-spacing: 0.01em;
+    --preview-line-height: 1.5;
+    --preview-stroke-width: 0px;
+    --preview-stroke-color: transparent;
+    --preview-shadow-color: rgba(51,214,192,.25);
+    --preview-shadow-blur: 22px;
   }
   .preview-panel .panel-head{padding:14px 16px 0;margin-bottom:0;}
   .preview-toggle-group{display:flex;gap:14px;flex-wrap:wrap;}
@@ -236,6 +244,16 @@
     background:var(--panel2);cursor:pointer;
   }
   .preview-control input[type=range]{width:88px;accent-color:var(--accent);}
+  .preview-control input[type=text]{
+    background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:6px;padding:5px 8px;font-size:12px;width:220px;
+  }
+  .preview-control input[type=text]:focus{outline:none;border-color:var(--accent-dim);}
+
+  .font-style-controls{
+    display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px 4px;
+    border-top:1px dashed var(--line);margin-top:10px;
+  }
 
   .eq-controls{
     display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px 4px;
@@ -282,20 +300,31 @@
   }
   .preview-single-text{
     font-family:var(--preview-font-family);
-    font-size:var(--preview-single-size);font-weight:700;text-align:center;color:var(--text);
-    line-height:1.5;letter-spacing:.01em;text-shadow:0 0 22px rgba(51,214,192,.25);
+    font-size:var(--preview-single-size);font-weight:var(--preview-font-weight);
+    font-style:var(--preview-font-style);
+    text-align:center;color:var(--text);
+    line-height:var(--preview-line-height);letter-spacing:var(--preview-letter-spacing);
+    text-shadow:0 0 var(--preview-shadow-blur) var(--preview-shadow-color);
+    -webkit-text-stroke:var(--preview-stroke-width) var(--preview-stroke-color);
     word-break:break-word;
   }
-  .preview-single-text.is-empty{color:var(--muted2);font-size:15px;font-weight:400;text-shadow:none;}
+  .preview-single-text.is-empty{
+    color:var(--muted2);font-size:15px;font-weight:400;font-style:normal;
+    text-shadow:none;-webkit-text-stroke:0 transparent;
+  }
 
   .preview-all{position:relative;z-index:2;max-height:280px;overflow-y:auto;padding:18px 16px;background:transparent;}
   .preview-line{
     font-family:var(--preview-font-family);
+    font-weight:var(--preview-font-weight);font-style:var(--preview-font-style);
+    letter-spacing:var(--preview-letter-spacing);
     padding:7px 10px;font-size:var(--preview-all-size);color:var(--muted);text-align:center;border-radius:6px;
-    transition:color .15s, background .15s;line-height:1.6;text-shadow:0 1px 6px rgba(0,0,0,.5);
+    transition:color .15s, background .15s;line-height:var(--preview-line-height);
+    text-shadow:0 1px 6px rgba(0,0,0,.5), 0 0 var(--preview-shadow-blur) var(--preview-shadow-color);
+    -webkit-text-stroke:calc(var(--preview-stroke-width) * 0.6) var(--preview-stroke-color);
   }
   .preview-line.meta{color:var(--meta);font-size:11.5px;font-style:italic;margin-top:8px;}
-  .preview-line.active{color:var(--accent);font-weight:700;background:rgba(51,214,192,.1);}
+  .preview-line.active{color:var(--accent);background:rgba(51,214,192,.1);}
   .preview-empty{text-align:center;color:var(--muted2);font-size:13px;padding:20px;}
 
   /* ---------- Footer ---------- */
@@ -418,12 +447,11 @@
       <div class="preview-controls">
         <label class="preview-control">
           <span>フォント</span>
-          <select id="previewFontFamily">
-            <option value="sans">ゴシック</option>
-            <option value="mincho">明朝</option>
-            <option value="rounded">丸ゴシック</option>
-            <option value="mono">等幅</option>
-          </select>
+          <select id="previewFontFamily"></select>
+        </label>
+        <label class="preview-control" id="customFontRow" style="display:none">
+          <input type="text" id="customFontNameInput" placeholder="Google Fontsのフォント名（例: Zen Kaku Gothic New）">
+          <button class="toggle-btn" type="button" id="customFontApplyBtn">適用</button>
         </label>
         <label class="preview-control">
           <span>文字サイズ</span>
@@ -438,6 +466,44 @@
         <input type="file" id="previewBgInput" accept="image/*" style="display:none">
         <button class="toggle-btn" type="button" id="previewBgClearBtn" disabled>背景をクリア</button>
         <button class="toggle-btn" type="button" id="previewEqToggle">グラフィックイコライザー</button>
+      </div>
+      <div class="font-style-controls" id="fontStyleControls">
+        <label class="preview-control">
+          <span>太さ</span>
+          <select id="fontWeight">
+            <option value="100">極細 (100)</option>
+            <option value="300">細字 (300)</option>
+            <option value="400">標準 (400)</option>
+            <option value="500">中太 (500)</option>
+            <option value="700" selected>太字 (700)</option>
+            <option value="900">極太 (900)</option>
+          </select>
+        </label>
+        <button class="toggle-btn" type="button" id="fontItalicToggle">イタリック</button>
+        <label class="preview-control">
+          <span>文字間隔</span>
+          <input type="range" id="fontLetterSpacing" min="-0.05" max="0.3" step="0.01" value="0.01">
+        </label>
+        <label class="preview-control">
+          <span>行間</span>
+          <input type="range" id="fontLineHeight" min="1" max="2.2" step="0.1" value="1.5">
+        </label>
+        <label class="preview-control">
+          <span>縁取り太さ</span>
+          <input type="range" id="fontStrokeWidth" min="0" max="4" step="0.5" value="0">
+        </label>
+        <label class="preview-control">
+          <span>縁取り色</span>
+          <input type="color" id="fontStrokeColor" value="#0a1512">
+        </label>
+        <label class="preview-control">
+          <span>影の色</span>
+          <input type="color" id="fontShadowColor" value="#33d6c0">
+        </label>
+        <label class="preview-control">
+          <span>影の強さ</span>
+          <input type="range" id="fontShadowStrength" min="0" max="1" step="0.05" value="0.55">
+        </label>
       </div>
       <div class="eq-controls" id="eqControls">
         <label class="preview-control">
@@ -597,6 +663,17 @@
   const previewToggleBtns = [document.getElementById('previewModeSingle'), document.getElementById('previewModeAll')];
   const previewFontFamilySelect = document.getElementById('previewFontFamily');
   const previewFontSizeSelect = document.getElementById('previewFontSize');
+  const customFontRow = document.getElementById('customFontRow');
+  const customFontNameInput = document.getElementById('customFontNameInput');
+  const customFontApplyBtn = document.getElementById('customFontApplyBtn');
+  const fontWeightSelect = document.getElementById('fontWeight');
+  const fontItalicToggle = document.getElementById('fontItalicToggle');
+  const fontLetterSpacingInput = document.getElementById('fontLetterSpacing');
+  const fontLineHeightInput = document.getElementById('fontLineHeight');
+  const fontStrokeWidthInput = document.getElementById('fontStrokeWidth');
+  const fontStrokeColorInput = document.getElementById('fontStrokeColor');
+  const fontShadowColorInput = document.getElementById('fontShadowColor');
+  const fontShadowStrengthInput = document.getElementById('fontShadowStrength');
   const previewStageOuter = document.getElementById('previewStageOuter');
   const previewStage = document.getElementById('previewStage');
   const previewBg = document.getElementById('previewBg');
@@ -620,12 +697,36 @@
   let previewActiveIdx = -1;
   let previewBgUrl = null;
 
-  const PREVIEW_FONTS = {
-    sans: "-apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', 'Segoe UI', sans-serif",
-    mincho: "'Hiragino Mincho ProN', 'Yu Mincho', YuMincho, serif",
-    rounded: "'Hiragino Maru Gothic ProN', 'UD Digi Kyokasho N-R', 'Rounded Mplus 1c', sans-serif",
-    mono: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace"
-  };
+  const SYSTEM_FONTS = [
+    { key:'sans', label:'ゴシック（システム）', css: "-apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', 'Segoe UI', sans-serif" },
+    { key:'mincho', label:'明朝（システム）', css: "'Hiragino Mincho ProN', 'Yu Mincho', YuMincho, serif" },
+    { key:'rounded', label:'丸ゴシック（システム）', css: "'Hiragino Maru Gothic ProN', 'UD Digi Kyokasho N-R', 'Rounded Mplus 1c', sans-serif" },
+    { key:'mono', label:'等幅（システム）', css: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace" }
+  ];
+  const GOOGLE_FONTS = [
+    { name:'Noto Sans JP', label:'Noto Sans JP（ゴシック）', fallback:'sans-serif' },
+    { name:'Noto Serif JP', label:'Noto Serif JP（明朝）', fallback:'serif' },
+    { name:'M PLUS Rounded 1c', label:'M PLUS Rounded 1c（丸ゴシック）', fallback:'sans-serif' },
+    { name:'Kosugi Maru', label:'Kosugi Maru（丸ゴシック）', fallback:'sans-serif' },
+    { name:'Sawarabi Gothic', label:'Sawarabi Gothic（ゴシック）', fallback:'sans-serif' },
+    { name:'Sawarabi Mincho', label:'Sawarabi Mincho（明朝）', fallback:'serif' },
+    { name:'Shippori Mincho', label:'Shippori Mincho（明朝）', fallback:'serif' },
+    { name:'Zen Kaku Gothic New', label:'Zen Kaku Gothic New（ゴシック）', fallback:'sans-serif' },
+    { name:'Zen Maru Gothic', label:'Zen Maru Gothic（丸ゴシック）', fallback:'sans-serif' },
+    { name:'Zen Old Mincho', label:'Zen Old Mincho（明朝）', fallback:'serif' },
+    { name:'Dela Gothic One', label:'Dela Gothic One（極太）', fallback:'sans-serif' },
+    { name:'Yusei Magic', label:'Yusei Magic（手書き風）', fallback:'sans-serif' },
+    { name:'RocknRoll One', label:'RocknRoll One（ロック調）', fallback:'sans-serif' },
+    { name:'Reggae One', label:'Reggae One（ポップ）', fallback:'sans-serif' },
+    { name:'Hachi Maru Pop', label:'Hachi Maru Pop（丸文字）', fallback:'sans-serif' },
+    { name:'DotGothic16', label:'DotGothic16（ドット）', fallback:'sans-serif' },
+    { name:'Kaisei Decol', label:'Kaisei Decol（装飾明朝）', fallback:'serif' },
+    { name:'Poppins', label:'Poppins（欧文）', fallback:'sans-serif' },
+    { name:'Montserrat', label:'Montserrat（欧文）', fallback:'sans-serif' },
+    { name:'Playfair Display', label:'Playfair Display（欧文セリフ）', fallback:'serif' },
+    { name:'Bebas Neue', label:'Bebas Neue（欧文・極太見出し）', fallback:'sans-serif' },
+    { name:'Pacifico', label:'Pacifico（欧文・手書き）', fallback:'cursive' }
+  ];
   const PREVIEW_SIZES = {
     s: { single: '22px', all: '12px' },
     m: { single: 'clamp(20px,4vw,34px)', all: '14px' },
@@ -633,15 +734,97 @@
     xl: { single: '52px', all: '21px' }
   };
 
+  (function populateFontSelect(){
+    const sysGroup = document.createElement('optgroup');
+    sysGroup.label = 'システムフォント';
+    SYSTEM_FONTS.forEach(function(f){
+      const opt = document.createElement('option');
+      opt.value = 'sys:' + f.key;
+      opt.textContent = f.label;
+      sysGroup.appendChild(opt);
+    });
+    previewFontFamilySelect.appendChild(sysGroup);
+
+    const googleGroup = document.createElement('optgroup');
+    googleGroup.label = 'Google Fonts';
+    GOOGLE_FONTS.forEach(function(f){
+      const opt = document.createElement('option');
+      opt.value = 'google:' + f.name;
+      opt.textContent = f.label;
+      googleGroup.appendChild(opt);
+    });
+    previewFontFamilySelect.appendChild(googleGroup);
+
+    const customOpt = document.createElement('option');
+    customOpt.value = 'custom';
+    customOpt.textContent = 'カスタム（Google Fontsを直接指定）';
+    previewFontFamilySelect.appendChild(customOpt);
+
+    previewFontFamilySelect.value = 'sys:sans';
+  })();
+
+  const loadedGoogleFonts = {};
+  function loadGoogleFont(name){
+    if(!name || loadedGoogleFonts[name]) return;
+    loadedGoogleFonts[name] = true;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://fonts.googleapis.com/css2?family=' +
+      encodeURIComponent(name).replace(/%20/g, '+') +
+      ':ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,400;1,700&display=swap';
+    document.head.appendChild(link);
+  }
+
   function applyPreviewStyle(){
-    const fam = PREVIEW_FONTS[previewFontFamilySelect.value] || PREVIEW_FONTS.sans;
+    const val = previewFontFamilySelect.value;
+    let cssFamily = SYSTEM_FONTS[0].css;
+    if(val.indexOf('sys:') === 0){
+      const key = val.slice(4);
+      const entry = SYSTEM_FONTS.filter(function(f){ return f.key === key; })[0];
+      cssFamily = entry ? entry.css : SYSTEM_FONTS[0].css;
+    } else if(val.indexOf('google:') === 0){
+      const name = val.slice(7);
+      const entry = GOOGLE_FONTS.filter(function(f){ return f.name === name; })[0];
+      cssFamily = "'" + name + "', " + (entry ? entry.fallback : 'sans-serif');
+      loadGoogleFont(name);
+    } else if(val === 'custom'){
+      const name = (customFontNameInput.value || '').trim();
+      if(name){
+        cssFamily = "'" + name + "', sans-serif";
+        loadGoogleFont(name);
+      }
+    }
     const size = PREVIEW_SIZES[previewFontSizeSelect.value] || PREVIEW_SIZES.m;
-    previewPanel.style.setProperty('--preview-font-family', fam);
+    previewPanel.style.setProperty('--preview-font-family', cssFamily);
     previewPanel.style.setProperty('--preview-single-size', size.single);
     previewPanel.style.setProperty('--preview-all-size', size.all);
+    previewPanel.style.setProperty('--preview-font-weight', fontWeightSelect.value);
+    previewPanel.style.setProperty('--preview-font-style', fontItalicToggle.classList.contains('active') ? 'italic' : 'normal');
+    previewPanel.style.setProperty('--preview-letter-spacing', fontLetterSpacingInput.value + 'em');
+    previewPanel.style.setProperty('--preview-line-height', fontLineHeightInput.value);
+    previewPanel.style.setProperty('--preview-stroke-width', fontStrokeWidthInput.value + 'px');
+    previewPanel.style.setProperty('--preview-stroke-color', parseFloat(fontStrokeWidthInput.value) > 0 ? fontStrokeColorInput.value : 'transparent');
+    previewPanel.style.setProperty('--preview-shadow-color', hexToRgba(fontShadowColorInput.value, fontShadowStrengthInput.value));
+    previewPanel.style.setProperty('--preview-shadow-blur', (fontShadowStrengthInput.value * 40) + 'px');
   }
-  previewFontFamilySelect.addEventListener('change', applyPreviewStyle);
+
+  previewFontFamilySelect.addEventListener('change', function(){
+    customFontRow.style.display = previewFontFamilySelect.value === 'custom' ? 'flex' : 'none';
+    applyPreviewStyle();
+  });
   previewFontSizeSelect.addEventListener('change', applyPreviewStyle);
+  customFontApplyBtn.addEventListener('click', applyPreviewStyle);
+  customFontNameInput.addEventListener('keydown', function(e){
+    if(e.key === 'Enter'){ e.preventDefault(); applyPreviewStyle(); }
+  });
+  fontWeightSelect.addEventListener('change', applyPreviewStyle);
+  fontItalicToggle.addEventListener('click', function(){
+    fontItalicToggle.classList.toggle('active');
+    applyPreviewStyle();
+  });
+  [fontLetterSpacingInput, fontLineHeightInput, fontStrokeWidthInput, fontStrokeColorInput, fontShadowColorInput, fontShadowStrengthInput].forEach(function(el){
+    el.addEventListener('input', applyPreviewStyle);
+  });
   applyPreviewStyle();
 
   /* ===================== Preview background image ===================== */
