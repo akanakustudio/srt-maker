@@ -134,7 +134,14 @@
   .help{padding:8px 18px 0;font-size:11.5px;color:var(--muted2);line-height:1.7;text-align:center;}
 
   /* ---------- Main / lyrics ---------- */
-  main{flex:1;padding:16px 18px 90px;}
+  main{
+    flex:1;padding:16px 18px 90px;
+    display:grid;grid-template-columns:1fr;gap:20px;align-items:start;
+  }
+  .preview-panel,.lyrics-section{min-width:0;}
+  @media (min-width:1180px){
+    main{grid-template-columns:minmax(380px,42%) minmax(420px,1fr);}
+  }
   .panel-head{
     display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px;
   }
@@ -209,7 +216,7 @@
 
   /* ---------- Lyrics preview ---------- */
   .preview-panel{
-    margin-bottom:16px;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden;
+    border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden;
     --preview-font-family: var(--sans);
     --preview-single-size: clamp(20px,4vw,34px);
     --preview-all-size: 14px;
@@ -263,7 +270,20 @@
   .preview-stage-outer.has-ratio{
     padding:22px 16px;background:#0d0f13;display:flex;justify-content:center;
   }
-  .preview-stage{position:relative;overflow:hidden;width:100%;}
+  .preview-stage{
+    position:relative;overflow:hidden;width:100%;
+    height:min(46vh,360px);min-height:160px;
+  }
+  .preview-stage-outer:not(.has-ratio) .preview-stage{
+    resize:vertical;overflow:auto;
+  }
+  .preview-stage-outer:not(.has-ratio) .preview-stage::after{
+    content:"";position:absolute;right:2px;bottom:2px;width:10px;height:10px;z-index:3;
+    background:
+      linear-gradient(135deg, transparent 0 45%, var(--muted2) 45% 55%, transparent 55% 100%),
+      linear-gradient(135deg, transparent 0 65%, var(--muted2) 65% 75%, transparent 75% 100%);
+    pointer-events:none;opacity:.5;
+  }
   .preview-stage-outer.has-ratio .preview-stage{
     border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.35);
   }
@@ -272,14 +292,6 @@
   }
   .preview-stage-outer .preview-stage.ratio-horizontal{
     aspect-ratio:16/9;width:100%;max-width:720px;height:auto;
-  }
-  .preview-stage.ratio-vertical .preview-single,
-  .preview-stage.ratio-horizontal .preview-single{
-    height:100%;min-height:0;
-  }
-  .preview-stage.ratio-vertical .preview-all,
-  .preview-stage.ratio-horizontal .preview-all{
-    height:100%;max-height:none;
   }
   .preview-bg{
     position:absolute;inset:0;z-index:0;
@@ -294,8 +306,8 @@
   .preview-eq{position:absolute;inset:0;z-index:1;width:100%;height:100%;pointer-events:none;display:block;}
 
   .preview-single{
-    position:relative;z-index:2;
-    min-height:140px;display:flex;align-items:center;justify-content:center;
+    position:relative;z-index:2;height:100%;
+    display:flex;align-items:center;justify-content:center;
     padding:28px 20px;background:transparent;
   }
   .preview-single-text{
@@ -313,7 +325,7 @@
     text-shadow:none;-webkit-text-stroke:0 transparent;
   }
 
-  .preview-all{position:relative;z-index:2;max-height:280px;overflow-y:auto;padding:18px 16px;background:transparent;}
+  .preview-all{position:relative;z-index:2;height:100%;overflow-y:auto;padding:18px 16px;background:transparent;}
   .preview-line{
     font-family:var(--preview-font-family);
     font-weight:var(--preview-font-weight);font-style:var(--preview-font-style);
@@ -349,10 +361,16 @@
   }
   .ghost-btn:hover{border-color:var(--accent-dim);color:var(--text);}
 
+  /* ---------- Tablet ---------- */
+  @media (min-width:641px) and (max-width:1179px){
+    main{gap:16px;}
+    .preview-controls,.font-style-controls,.eq-controls{gap:8px;}
+  }
+
   /* ---------- Mobile ---------- */
   @media (max-width:640px){
     header{padding:10px 12px 8px;}
-    main{padding:12px 12px 100px;}
+    main{padding:12px 12px 100px;gap:14px;}
     .transport{padding:10px 12px;}
     .filebtn{padding:8px 10px;font-size:12px;}
     .filename{max-width:120px;}
@@ -362,9 +380,18 @@
     table{font-size:12px;}
     input.time-input{width:96px;font-size:11.5px;}
     td.time{width:104px;}
+    td.actions{width:88px;}
     .lyrics-wrap{height:48vh;}
     footer{padding:10px 12px;}
     .status{width:100%;order:2;margin-right:0;}
+
+    .preview-controls,.font-style-controls,.eq-controls{gap:8px;padding-left:12px;padding-right:12px;}
+    .preview-control input[type=range]{width:64px;}
+    .preview-control input[type=text]{width:150px;}
+    .preview-stage{height:min(38vh,280px);}
+    .preview-stage-outer.has-ratio .preview-stage.ratio-vertical{height:min(58vh,480px);}
+    .preview-stage-outer.has-ratio .preview-stage.ratio-horizontal{max-width:100%;}
+    .preview-stage-outer.has-ratio{padding:14px 10px;}
   }
 </style>
 </head>
@@ -553,38 +580,40 @@
       </div>
     </div>
 
-    <div class="panel-head">
-      <div class="panel-title">歌詞タイムテーブル <b id="lineCount">0行</b></div>
-      <div class="legend">
-        <span><span class="swatch" style="background:var(--accent)"></span>対象行</span>
-        <span><span class="swatch" style="background:var(--meta)"></span>メタタグ行（保存時に除去）</span>
+    <div class="lyrics-section">
+      <div class="panel-head">
+        <div class="panel-title">歌詞タイムテーブル <b id="lineCount">0行</b></div>
+        <div class="legend">
+          <span><span class="swatch" style="background:var(--accent)"></span>対象行</span>
+          <span><span class="swatch" style="background:var(--meta)"></span>メタタグ行（保存時に除去）</span>
+        </div>
       </div>
-    </div>
 
-    <div class="table-toolbar">
-      <button class="ghost-btn small" id="bulkSyncBtn" disabled>選択行: 終了時間を次行の開始時間にセット</button>
-      <span class="hint" id="selectedCountHint"></span>
-    </div>
+      <div class="table-toolbar">
+        <button class="ghost-btn small" id="bulkSyncBtn" disabled>選択行: 終了時間を次行の開始時間にセット</button>
+        <span class="hint" id="selectedCountHint"></span>
+      </div>
 
-    <div class="lyrics-wrap" id="lyricsWrap">
-      <table>
-        <thead>
-          <tr>
-            <th style="width:28px"><input type="checkbox" id="selectAllCheckbox" title="対象行を全選択/解除"></th>
-            <th style="width:34px">#</th>
-            <th style="width:132px">開始時間</th>
-            <th style="width:132px">終了時間</th>
-            <th>歌詞行</th>
-            <th style="width:104px"></th>
-          </tr>
-        </thead>
-        <tbody id="tbody">
-        </tbody>
-      </table>
-      <div class="empty-state" id="emptyState">
-        歌詞ファイル（.md / .txt）を開くと、ここに行ごとの編集テーブルが表示されます。<br>
-        Sunoのメタタグ（例: <span style="color:var(--meta)">[Verse 1]</span>）を含んだ歌詞もそのまま読み込めます。<br>
-        既存の.srtファイルを開くと、開始・終了時間も含めてそのまま読み込めます。
+      <div class="lyrics-wrap" id="lyricsWrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:28px"><input type="checkbox" id="selectAllCheckbox" title="対象行を全選択/解除"></th>
+              <th style="width:34px">#</th>
+              <th style="width:132px">開始時間</th>
+              <th style="width:132px">終了時間</th>
+              <th>歌詞行</th>
+              <th style="width:104px"></th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+          </tbody>
+        </table>
+        <div class="empty-state" id="emptyState">
+          歌詞ファイル（.md / .txt）を開くと、ここに行ごとの編集テーブルが表示されます。<br>
+          Sunoのメタタグ（例: <span style="color:var(--meta)">[Verse 1]</span>）を含んだ歌詞もそのまま読み込めます。<br>
+          既存の.srtファイルを開くと、開始・終了時間も含めてそのまま読み込めます。
+        </div>
       </div>
     </div>
   </main>
@@ -1074,6 +1103,15 @@
   window.addEventListener('resize', function(){
     if(eqEnabled) resizeEqCanvas();
   });
+
+  // Tracks the stage's own box size so manual drag-resizing (the resize handle
+  // in free display mode) keeps the EQ canvas in sync, not just window resizes.
+  if(typeof ResizeObserver !== 'undefined'){
+    const eqStageResizeObserver = new ResizeObserver(function(){
+      if(eqEnabled) resizeEqCanvas();
+    });
+    eqStageResizeObserver.observe(previewStage);
+  }
 
   /* ---------- EQ style customization ---------- */
   function applyEqStyleToUI(style){
