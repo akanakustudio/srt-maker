@@ -215,6 +215,7 @@
     --preview-all-size: 14px;
   }
   .preview-panel .panel-head{padding:14px 16px 0;margin-bottom:0;}
+  .preview-toggle-group{display:flex;gap:14px;flex-wrap:wrap;}
   .preview-toggle{display:flex;gap:6px;}
   .toggle-btn{
     background:var(--panel2);border:1px solid var(--line);color:var(--muted);
@@ -231,7 +232,27 @@
   }
   .preview-control select:focus{outline:none;border-color:var(--accent-dim);}
 
-  .preview-stage{position:relative;overflow:hidden;}
+  .preview-stage-outer.has-ratio{
+    padding:22px 16px;background:#0d0f13;display:flex;justify-content:center;
+  }
+  .preview-stage{position:relative;overflow:hidden;width:100%;}
+  .preview-stage-outer.has-ratio .preview-stage{
+    border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.35);
+  }
+  .preview-stage-outer .preview-stage.ratio-vertical{
+    aspect-ratio:9/16;height:min(70vh,640px);width:auto;max-width:100%;
+  }
+  .preview-stage-outer .preview-stage.ratio-horizontal{
+    aspect-ratio:16/9;width:100%;max-width:720px;height:auto;
+  }
+  .preview-stage.ratio-vertical .preview-single,
+  .preview-stage.ratio-horizontal .preview-single{
+    height:100%;min-height:0;
+  }
+  .preview-stage.ratio-vertical .preview-all,
+  .preview-stage.ratio-horizontal .preview-all{
+    height:100%;max-height:none;
+  }
   .preview-bg{
     position:absolute;inset:0;z-index:0;
     background:radial-gradient(ellipse at center, #1c2129, #14171c 80%);
@@ -372,9 +393,16 @@
     <div class="preview-panel" id="previewPanel">
       <div class="panel-head">
         <div class="panel-title">歌詞プレビュー</div>
-        <div class="preview-toggle">
-          <button class="toggle-btn active" type="button" id="previewModeSingle" data-mode="single">一行プレビュー</button>
-          <button class="toggle-btn" type="button" id="previewModeAll" data-mode="all">歌詞全体表示</button>
+        <div class="preview-toggle-group">
+          <div class="preview-toggle">
+            <button class="toggle-btn active" type="button" id="previewModeSingle" data-mode="single">一行プレビュー</button>
+            <button class="toggle-btn" type="button" id="previewModeAll" data-mode="all">歌詞全体表示</button>
+          </div>
+          <div class="preview-toggle">
+            <button class="toggle-btn active" type="button" id="previewRatioFree" data-ratio="free">自由表示</button>
+            <button class="toggle-btn" type="button" id="previewRatioVertical" data-ratio="vertical">縦動画 (9:16)</button>
+            <button class="toggle-btn" type="button" id="previewRatioHorizontal" data-ratio="horizontal">横動画 (16:9)</button>
+          </div>
         </div>
       </div>
       <div class="preview-controls">
@@ -401,13 +429,15 @@
         <button class="toggle-btn" type="button" id="previewBgClearBtn" disabled>背景をクリア</button>
         <button class="toggle-btn" type="button" id="previewEqToggle">グラフィックイコライザー</button>
       </div>
-      <div class="preview-stage" id="previewStage">
-        <div class="preview-bg" id="previewBg"></div>
-        <canvas class="preview-eq" id="previewEqCanvas"></canvas>
-        <div class="preview-single" id="previewSingle">
-          <div class="preview-single-text is-empty" id="previewSingleText">—</div>
+      <div class="preview-stage-outer" id="previewStageOuter">
+        <div class="preview-stage" id="previewStage">
+          <div class="preview-bg" id="previewBg"></div>
+          <canvas class="preview-eq" id="previewEqCanvas"></canvas>
+          <div class="preview-single" id="previewSingle">
+            <div class="preview-single-text is-empty" id="previewSingleText">—</div>
+          </div>
+          <div class="preview-all" id="previewAll" style="display:none"></div>
         </div>
-        <div class="preview-all" id="previewAll" style="display:none"></div>
       </div>
     </div>
 
@@ -521,12 +551,14 @@
   const previewToggleBtns = [document.getElementById('previewModeSingle'), document.getElementById('previewModeAll')];
   const previewFontFamilySelect = document.getElementById('previewFontFamily');
   const previewFontSizeSelect = document.getElementById('previewFontSize');
+  const previewStageOuter = document.getElementById('previewStageOuter');
   const previewStage = document.getElementById('previewStage');
   const previewBg = document.getElementById('previewBg');
   const previewEqCanvas = document.getElementById('previewEqCanvas');
   const previewBgInput = document.getElementById('previewBgInput');
   const previewBgClearBtn = document.getElementById('previewBgClearBtn');
   const previewEqToggle = document.getElementById('previewEqToggle');
+  const previewRatioBtns = [document.getElementById('previewRatioFree'), document.getElementById('previewRatioVertical'), document.getElementById('previewRatioHorizontal')];
   let previewMode = 'single';   // 'single' | 'all'
   let previewLineEls = {};      // idx -> element, for the "all" view
   let previewActiveIdx = -1;
@@ -1089,6 +1121,18 @@
       if(previewMode === 'all' && previewLineEls[previewActiveIdx]){
         previewLineEls[previewActiveIdx].scrollIntoView({block:'center'});
       }
+      if(eqEnabled) resizeEqCanvas();
+    });
+  });
+
+  previewRatioBtns.forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const ratio = btn.dataset.ratio;
+      previewRatioBtns.forEach(function(b){ b.classList.toggle('active', b === btn); });
+      previewStage.classList.remove('ratio-vertical', 'ratio-horizontal');
+      if(ratio === 'vertical') previewStage.classList.add('ratio-vertical');
+      else if(ratio === 'horizontal') previewStage.classList.add('ratio-horizontal');
+      previewStageOuter.classList.toggle('has-ratio', ratio !== 'free');
       if(eqEnabled) resizeEqCanvas();
     });
   });
