@@ -691,12 +691,13 @@
     return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
   }
 
-  function fftSizeForBarCount(barCount){
-    const needed = Math.max(32, barCount * 2);
-    let size = 32;
-    while(size < needed) size *= 2;
-    return Math.min(size, 2048);
-  }
+  // Fixed high-resolution FFT, independent of the visual bar count, so the
+  // logarithmic bucketing below has enough bins to work with even for few bars.
+  const EQ_FFT_SIZE = 2048;
+  // How much to boost higher-frequency bars: music energy naturally rolls off
+  // toward the high end, so without this the right side of the display reads
+  // as flat/unreactive even though there is audible (quieter) high-frequency content.
+  const EQ_HIGH_FREQ_BOOST = 1.6;
 
   function ensureAudioGraph(){
     if(audioCtx) return;
@@ -705,20 +706,11 @@
     audioCtx = new Ctx();
     const sourceNode = audioCtx.createMediaElementSource(audioEl);
     analyserNode = audioCtx.createAnalyser();
-    analyserNode.fftSize = fftSizeForBarCount(eqStyle.barCount);
+    analyserNode.fftSize = EQ_FFT_SIZE;
     analyserNode.smoothingTimeConstant = eqStyle.smoothing;
     eqDataArray = new Uint8Array(analyserNode.frequencyBinCount);
     sourceNode.connect(analyserNode);
     analyserNode.connect(audioCtx.destination);
-  }
-
-  function applyEqFftSize(){
-    if(!analyserNode) return;
-    const size = fftSizeForBarCount(eqStyle.barCount);
-    if(analyserNode.fftSize !== size){
-      analyserNode.fftSize = size;
-      eqDataArray = new Uint8Array(analyserNode.frequencyBinCount);
-    }
   }
 
   function resizeEqCanvas(){
@@ -730,13 +722,20 @@
   function getBarValues(barCount){
     const values = new Array(barCount);
     const bins = eqDataArray.length;
-    const perBar = bins / barCount;
+    let prevEnd = 0;
     for(let i = 0; i < barCount; i++){
-      const start = Math.floor(i * perBar);
-      const end = Math.max(start + 1, Math.floor((i + 1) * perBar));
-      let sum = 0, cnt = 0;
-      for(let j = start; j < end && j < bins; j++){ sum += eqDataArray[j]; cnt++; }
-      values[i] = cnt ? (sum / cnt) / 255 : 0;
+      // Logarithmic bin range per bar (like a real spectrum analyzer): narrow,
+      // fine-grained ranges for the bass end, progressively wider ranges toward
+      // the treble end, matching how both music energy and human hearing are
+      // distributed across the spectrum.
+      const t1 = (i + 1) / barCount;
+      let end = Math.round(Math.pow(bins, t1));
+      end = Math.min(bins, Math.max(prevEnd + 1, end));
+      let peak = 0;
+      for(let j = prevEnd; j < end; j++){ if(eqDataArray[j] > peak) peak = eqDataArray[j]; }
+      const boost = 1 + (i / (barCount - 1 || 1)) * (EQ_HIGH_FREQ_BOOST - 1);
+      values[i] = Math.min(1, (peak / 255) * boost);
+      prevEnd = end;
     }
     return values;
   }
@@ -906,7 +905,6 @@
   function setEqStyle(style){
     eqStyle = Object.assign({}, eqStyle, style);
     applyEqStyleToUI(eqStyle);
-    applyEqFftSize();
     if(analyserNode) analyserNode.smoothingTimeConstant = eqStyle.smoothing;
   }
 
@@ -915,7 +913,6 @@
   eqColorEndInput.addEventListener('input', function(){ eqStyle.colorEnd = eqColorEndInput.value; });
   eqBarCountInput.addEventListener('input', function(){
     eqStyle.barCount = parseInt(eqBarCountInput.value, 10);
-    applyEqFftSize();
   });
   eqSmoothingInput.addEventListener('input', function(){
     eqStyle.smoothing = parseFloat(eqSmoothingInput.value);
