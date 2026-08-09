@@ -1756,7 +1756,8 @@
     return lines;
   }
 
-  function drawCanvasBackground(ctx, w, h){
+  function drawCanvasBackground(ctx, w, h, scale){
+    scale = scale || 1;
     ctx.fillStyle = '#14171c';
     ctx.fillRect(0, 0, w, h);
     const img = previewBgImageEl;
@@ -1772,16 +1773,20 @@
     const mode = bgSizeModeSelect.value;
     let drawW, drawH;
     if(mode === 'cover'){
-      const scale = Math.max(w / iw, h / ih);
-      drawW = iw * scale; drawH = ih * scale;
+      const bgScale = Math.max(w / iw, h / ih);
+      drawW = iw * bgScale; drawH = ih * bgScale;
     } else if(mode === 'auto'){
-      drawW = iw; drawH = ih;
+      // "auto" renders the image at its native pixel size relative to the on-screen
+      // preview (CSS background-size:auto is 1 image px = 1 CSS px there); scale by
+      // the export/on-screen resolution ratio so it occupies the same proportion of
+      // the frame in the exported video instead of shrinking at higher export resolutions.
+      drawW = iw * scale; drawH = ih * scale;
     } else if(mode === 'zoom'){
       const zoom = (parseFloat(bgZoomInput.value) || 100) / 100;
       drawW = w * zoom; drawH = drawW * (ih / iw);
     } else {
-      const scale = Math.min(w / iw, h / ih);
-      drawW = iw * scale; drawH = ih * scale;
+      const bgScale = Math.min(w / iw, h / ih);
+      drawW = iw * bgScale; drawH = ih * bgScale;
     }
     const posX = (parseFloat(bgPosXInput.value) || 50) / 100;
     const posY = (parseFloat(bgPosYInput.value) || 50) / 100;
@@ -1907,7 +1912,7 @@
     recordRAF = requestAnimationFrame(drawExportFrame);
     const w = recordCanvas.width, h = recordCanvas.height;
     const scale = w / (previewEqCanvas.width || w);
-    drawCanvasBackground(recordCtx, w, h);
+    drawCanvasBackground(recordCtx, w, h, scale);
     if(eqEnabled && analyserNode){
       const rect = computeEqRect(w, h, scale);
       recordCtx.save();
