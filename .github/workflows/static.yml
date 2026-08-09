@@ -24,9 +24,12 @@ concurrency:
 jobs:
   # Single deploy job since we're just deploying
   deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    # No `environment:` here: the repo's "github-pages" environment has a
+    # deployment branch policy that only allows the "gh-pages" branch, but this
+    # job runs on pushes to "main" — with the environment attached, GitHub
+    # rejects the job before it even starts (0 steps, instant failure). That
+    # protection is only relevant to the OIDC-based actions/deploy-pages flow;
+    # peaceiris/actions-gh-pages just does a plain git push and doesn't need it.
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
