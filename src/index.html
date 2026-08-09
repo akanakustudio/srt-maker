@@ -173,8 +173,9 @@
   tbody tr.blank td{color:var(--muted2);}
   td{padding:6px 8px;vertical-align:middle;}
   td.idx{color:var(--muted2);font-family:var(--mono);font-size:11px;width:34px;text-align:right;cursor:pointer;}
+  td.sel{width:28px;text-align:center;}
   td.time{width:132px;}
-  td.actions{width:70px;white-space:nowrap;}
+  td.actions{width:104px;white-space:nowrap;}
 
   input.time-input{
     width:118px;font-family:var(--mono);font-size:12.5px;background:var(--panel2);
@@ -198,6 +199,11 @@
   }
   .rowbtn:hover{border-color:var(--accent-dim);color:var(--text);}
   .rowbtn.del:hover{border-color:var(--danger);color:var(--danger);}
+  .rowbtn:disabled{opacity:.3;cursor:not-allowed;border-color:var(--line);color:var(--muted);}
+
+  .table-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;}
+  .table-toolbar .ghost-btn.small{padding:7px 12px;font-size:12px;}
+  .table-toolbar .hint{font-size:11.5px;color:var(--muted2);}
 
   .empty-state{padding:40px 20px;text-align:center;color:var(--muted2);font-size:13px;line-height:1.8;}
 
@@ -391,15 +397,21 @@
       </div>
     </div>
 
+    <div class="table-toolbar">
+      <button class="ghost-btn small" id="bulkSyncBtn" disabled>選択行: 終了時間を次行の開始時間にセット</button>
+      <span class="hint" id="selectedCountHint"></span>
+    </div>
+
     <div class="lyrics-wrap" id="lyricsWrap">
       <table>
         <thead>
           <tr>
+            <th style="width:28px"><input type="checkbox" id="selectAllCheckbox" title="対象行を全選択/解除"></th>
             <th style="width:34px">#</th>
             <th style="width:132px">開始時間</th>
             <th style="width:132px">終了時間</th>
             <th>歌詞行</th>
-            <th style="width:70px"></th>
+            <th style="width:104px"></th>
           </tr>
         </thead>
         <tbody id="tbody">
@@ -475,6 +487,10 @@
   const addLineBtn = document.getElementById('addLineBtn');
   const saveBtn = document.getElementById('saveBtn');
   const statusEl = document.getElementById('status');
+  const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+  const bulkSyncBtn = document.getElementById('bulkSyncBtn');
+  const selectedCountHint = document.getElementById('selectedCountHint');
+  let selectedIds = new Set();
 
   const previewPanel = document.getElementById('previewPanel');
   const previewSingle = document.getElementById('previewSingle');
@@ -727,12 +743,31 @@
     emptyState.style.display = lyricsLines.length ? 'none' : 'block';
     lineCount.textContent = lyricsLines.filter(l => !l.isMeta && !l.isBlank).length + '行 (全' + lyricsLines.length + '行)';
 
+    const idsPresent = new Set(lyricsLines.map(l => l.id));
+    selectedIds.forEach(function(id){ if(!idsPresent.has(id)) selectedIds.delete(id); });
+
     lyricsLines.forEach(function(line, i){
       const tr = document.createElement('tr');
       tr.dataset.idx = i;
       if(line.isMeta) tr.classList.add('meta');
       else if(line.isBlank) tr.classList.add('blank');
       if(i === currentIndex) tr.classList.add('current');
+
+      // select cell
+      const tdSel = document.createElement('td');
+      tdSel.className = 'sel';
+      if(!line.isMeta && !line.isBlank){
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = selectedIds.has(line.id);
+        cb.title = '一括操作の対象に選択';
+        cb.addEventListener('change', function(){
+          if(cb.checked) selectedIds.add(line.id); else selectedIds.delete(line.id);
+          updateBulkToolbar();
+        });
+        tdSel.appendChild(cb);
+      }
+      tr.appendChild(tdSel);
 
       // index cell
       const tdIdx = document.createElement('td');
@@ -812,8 +847,24 @@
         if(currentIndex >= lyricsLines.length) currentIndex = firstTimeableIndex(0);
         renderTable();
       });
+      const syncBtn = document.createElement('button');
+      syncBtn.className = 'rowbtn';
+      syncBtn.textContent = '⇥';
+      syncBtn.title = '終了時間を次行の開始時間に合わせる';
+      syncBtn.style.marginLeft = '4px';
+      const nextIdx = (!line.isMeta && !line.isBlank) ? firstTimeableIndex(i + 1) : -1;
+      if(line.isMeta || line.isBlank || nextIdx === -1) syncBtn.disabled = true;
+      syncBtn.addEventListener('click', function(){
+        if(syncEndToNextStart(i)){
+          renderTable();
+          setStatus((i+1) + '行目: 終了時間を次行の開始時間にセットしました', 'ok');
+        } else {
+          setStatus('次行の開始時間が未設定のため、セットできませんでした', 'err');
+        }
+      });
       tdAct.appendChild(addBtn);
       tdAct.appendChild(delBtn);
+      tdAct.appendChild(syncBtn);
       tr.appendChild(tdAct);
 
       tbody.appendChild(tr);
@@ -821,9 +872,62 @@
 
     updateCurrentLineHint();
     updateSaveEnabled();
+    updateBulkToolbar();
     renderPreviewAll();
     updatePreviewHighlight();
   }
+
+  /* ===================== End-time sync (to next line's start) ===================== */
+  function syncEndToNextStart(i){
+    const line = lyricsLines[i];
+    if(!line || line.isMeta || line.isBlank) return false;
+    const nextIdx = firstTimeableIndex(i + 1);
+    if(nextIdx === -1) return false;
+    const nextLine = lyricsLines[nextIdx];
+    if(nextLine.start === null) return false;
+    line.end = nextLine.start;
+    return true;
+  }
+
+  function updateBulkToolbar(){
+    const ids = lyricsLines.filter(l => !l.isMeta && !l.isBlank).map(l => l.id);
+    const selectedCount = ids.filter(id => selectedIds.has(id)).length;
+    bulkSyncBtn.disabled = selectedCount === 0;
+    selectedCountHint.textContent = selectedCount > 0 ? selectedCount + '行選択中' : '';
+    if(ids.length === 0){
+      selectAllCheckbox.checked = false;
+      selectAllCheckbox.indeterminate = false;
+      selectAllCheckbox.disabled = true;
+    } else {
+      selectAllCheckbox.disabled = false;
+      selectAllCheckbox.checked = selectedCount === ids.length;
+      selectAllCheckbox.indeterminate = selectedCount > 0 && selectedCount < ids.length;
+    }
+  }
+
+  selectAllCheckbox.addEventListener('change', function(){
+    const ids = lyricsLines.filter(l => !l.isMeta && !l.isBlank).map(l => l.id);
+    if(selectAllCheckbox.checked){
+      ids.forEach(function(id){ selectedIds.add(id); });
+    } else {
+      ids.forEach(function(id){ selectedIds.delete(id); });
+    }
+    renderTable();
+  });
+
+  bulkSyncBtn.addEventListener('click', function(){
+    let successCount = 0, failCount = 0;
+    lyricsLines.forEach(function(line, i){
+      if(!selectedIds.has(line.id)) return;
+      if(syncEndToNextStart(i)) successCount++; else failCount++;
+    });
+    renderTable();
+    if(successCount === 0){
+      setStatus('次行の開始時間が未設定のため、終了時間をセットできませんでした', 'err');
+    } else {
+      setStatus(successCount + '行の終了時間を次行の開始時間にセットしました' + (failCount ? '（' + failCount + '行はスキップ）' : ''), 'ok');
+    }
+  });
 
   function makeTimeInput(line, field){
     const input = document.createElement('input');
@@ -895,7 +999,7 @@
   function updateLyricsPreview(activeIdx){
     const line = activeIdx !== -1 ? lyricsLines[activeIdx] : null;
     const text = line ? stripMetaTags(line.text) : '';
-    previewSingleText.textContent = text || '—';
+    previewSingleText.textContent = text || '♪';
     previewSingleText.classList.toggle('is-empty', !text);
 
     if(previewActiveIdx !== activeIdx){
