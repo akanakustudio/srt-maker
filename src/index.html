@@ -1065,9 +1065,27 @@
   });
   applyBgTransform();
 
-  let previewBgImageEl = null;
-  function loadPreviewBgImage(url){
-    if(!url){ previewBgImageEl = null; return; }
+  let previewBgImageEl = null; // an ImageBitmap (preferred) or HTMLImageElement (fallback)
+  function loadPreviewBgImage(source){
+    if(!source){ previewBgImageEl = null; return; }
+    // CSS background-image (used for the on-screen preview) auto-applies a photo's
+    // EXIF orientation, but a plain `new Image()` + canvas drawImage() historically
+    // does not always do the same — so a rotated phone photo can end up with its
+    // raw (pre-rotation) pixel dimensions used for the cover/contain math here,
+    // producing a completely different crop than what's shown on screen.
+    // createImageBitmap(..., {imageOrientation:'from-image'}) normalizes this so
+    // canvas rendering matches the CSS-rendered preview exactly.
+    if(typeof createImageBitmap === 'function' && source instanceof Blob){
+      createImageBitmap(source, { imageOrientation: 'from-image' })
+        .then(function(bitmap){ previewBgImageEl = bitmap; })
+        .catch(function(){ loadPreviewBgImageFallback(source); });
+    } else if(typeof source === 'string'){
+      loadPreviewBgImageFallback(source);
+    } else {
+      loadPreviewBgImageFallback(URL.createObjectURL(source));
+    }
+  }
+  function loadPreviewBgImageFallback(url){
     const img = new Image();
     img.src = url;
     previewBgImageEl = img;
@@ -1081,7 +1099,7 @@
     previewBg.style.backgroundImage = 'url(' + previewBgUrl + ')';
     previewBg.classList.add('has-image');
     previewBgClearBtn.disabled = false;
-    loadPreviewBgImage(previewBgUrl);
+    loadPreviewBgImage(file);
   });
 
   previewBgClearBtn.addEventListener('click', function(){
@@ -1761,7 +1779,9 @@
     ctx.fillStyle = '#14171c';
     ctx.fillRect(0, 0, w, h);
     const img = previewBgImageEl;
-    if(!img || !img.complete || !img.naturalWidth){
+    const isBitmap = typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap;
+    const ready = img && (isBitmap || (img.complete && img.naturalWidth));
+    if(!ready){
       const grad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.max(w, h) * 0.7);
       grad.addColorStop(0, '#1c2129');
       grad.addColorStop(1, '#14171c');
@@ -1769,7 +1789,8 @@
       ctx.fillRect(0, 0, w, h);
       return;
     }
-    const iw = img.naturalWidth, ih = img.naturalHeight;
+    const iw = isBitmap ? img.width : img.naturalWidth;
+    const ih = isBitmap ? img.height : img.naturalHeight;
     const mode = bgSizeModeSelect.value;
     let drawW, drawH;
     if(mode === 'cover'){
@@ -1782,14 +1803,21 @@
       // the frame in the exported video instead of shrinking at higher export resolutions.
       drawW = iw * scale; drawH = ih * scale;
     } else if(mode === 'zoom'){
-      const zoom = (parseFloat(bgZoomInput.value) || 100) / 100;
+      const zoomRaw = parseFloat(bgZoomInput.value);
+      const zoom = (isNaN(zoomRaw) ? 100 : zoomRaw) / 100;
       drawW = w * zoom; drawH = drawW * (ih / iw);
     } else {
       const bgScale = Math.min(w / iw, h / ih);
       drawW = iw * bgScale; drawH = ih * bgScale;
     }
-    const posX = (parseFloat(bgPosXInput.value) || 50) / 100;
-    const posY = (parseFloat(bgPosYInput.value) || 50) / 100;
+    // Note: use isNaN checks here, not `parseFloat(...) || 50` — 0 is a valid,
+    // reachable position (fully left/top) and is falsy, so `0 || 50` would
+    // silently discard it and re-center the crop, unlike the on-screen CSS
+    // path (applyBgTransform) which sets it via plain string concatenation.
+    const posXRaw = parseFloat(bgPosXInput.value);
+    const posYRaw = parseFloat(bgPosYInput.value);
+    const posX = (isNaN(posXRaw) ? 50 : posXRaw) / 100;
+    const posY = (isNaN(posYRaw) ? 50 : posYRaw) / 100;
     ctx.drawImage(img, (w - drawW) * posX, (h - drawH) * posY, drawW, drawH);
     if(previewBg.classList.contains('has-image')){
       ctx.fillStyle = 'rgba(8,10,13,.48)';
