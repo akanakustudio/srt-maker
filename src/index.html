@@ -61,11 +61,15 @@
   input[type=file]{display:none;}
 
   /* ---------- Transport ---------- */
+  /* Fixed to the bottom of the viewport (stacked directly above the footer,
+     offset by its measured height via --footer-h) instead of sticking under
+     the header, so playback controls stay reachable without scrolling back
+     up while editing the lyrics table further down the page. */
   .transport{
-    padding:12px 18px;border-bottom:1px solid var(--line);background:var(--panel);
-    position:sticky;top:0;z-index:20;
+    padding:12px 18px;border-top:1px solid var(--line);background:var(--panel);
+    position:fixed;left:0;right:0;bottom:var(--footer-h,64px);z-index:25;
+    box-shadow:0 -6px 18px rgba(0,0,0,.3);
   }
-  .transport.floating{top:84px;}
   .seekrow{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
   .playbtn{
     flex:none;width:38px;height:38px;border-radius:50%;
@@ -135,7 +139,7 @@
 
   /* ---------- Main / lyrics ---------- */
   main{
-    flex:1;padding:16px 18px 90px;
+    flex:1;padding:16px 18px calc(var(--transport-h,180px) + var(--footer-h,64px) + 16px);
     display:grid;grid-template-columns:1fr;gap:20px;align-items:start;
   }
   .preview-panel,.lyrics-section{min-width:0;}
@@ -380,9 +384,9 @@
 
   /* ---------- Footer ---------- */
   footer{
-    position:sticky;bottom:0;background:linear-gradient(0deg,#14171c,rgba(20,23,28,.92));
+    position:fixed;left:0;right:0;bottom:0;background:linear-gradient(0deg,#14171c,rgba(20,23,28,.92));
     border-top:1px solid var(--line);padding:12px 18px;display:flex;gap:10px;justify-content:flex-end;
-    align-items:center;flex-wrap:wrap;
+    align-items:center;flex-wrap:wrap;z-index:26;
   }
   .status{font-size:12px;color:var(--muted);margin-right:auto;min-height:16px;}
   .status.err{color:var(--danger);}
@@ -409,7 +413,7 @@
   /* ---------- Mobile ---------- */
   @media (max-width:640px){
     header{padding:10px 12px 8px;}
-    main{padding:12px 12px 100px;gap:14px;}
+    main{padding:12px 12px calc(var(--transport-h,220px) + var(--footer-h,64px) + 12px);gap:14px;}
     .transport{padding:10px 12px;}
     .filebtn{padding:8px 10px;font-size:12px;}
     .filename{max-width:120px;}
@@ -743,7 +747,7 @@
           </div>
           <canvas class="preview-eq" id="previewEqCanvas"></canvas>
           <div class="preview-single" id="previewSingle">
-            <div class="preview-single-text is-empty" id="previewSingleText">—</div>
+            <div class="preview-single-text is-empty" id="previewSingleText"></div>
           </div>
           <div class="preview-all" id="previewAll" style="display:none"></div>
         </div>
@@ -816,6 +820,27 @@
   audioEl.style.display = "none";
   document.body.appendChild(audioEl);
   let currentAudioUrl = null;
+
+  // The transport bar (playback controls) is fixed above the footer, and the
+  // footer itself is fixed to the very bottom - both heights vary (control
+  // wrapping on narrow screens, status text, etc.), so measure them live and
+  // expose as CSS vars that main's bottom padding and the transport's own
+  // `bottom` offset are defined in terms of, instead of guessing static px.
+  (function syncBottomBarHeights(){
+    const transportEl = document.querySelector('.transport');
+    const footerEl = document.querySelector('footer');
+    function sync(){
+      document.documentElement.style.setProperty('--transport-h', transportEl.offsetHeight + 'px');
+      document.documentElement.style.setProperty('--footer-h', footerEl.offsetHeight + 'px');
+    }
+    if(typeof ResizeObserver !== 'undefined'){
+      new ResizeObserver(sync).observe(transportEl);
+      new ResizeObserver(sync).observe(footerEl);
+    } else {
+      window.addEventListener('resize', sync);
+    }
+    sync();
+  })();
 
   const AUDIO_ERROR_MESSAGES = {
     1: '読み込みが中断されました (MEDIA_ERR_ABORTED)',
@@ -2713,7 +2738,7 @@
     if(!text){
       ctx.font = '400 ' + (15 * scale) + 'px ' + cfg.familyVar;
       ctx.fillStyle = theme.muted2;
-      ctx.fillText('♪', anchorX, anchorY);
+      ctx.fillText('', anchorX, anchorY);
       ctx.restore();
       return;
     }
@@ -3519,7 +3544,7 @@
 
   let lineTransitionTimer = null;
   function setSingleLineContent(text){
-    previewSingleText.textContent = text || '♪';
+    previewSingleText.textContent = text || '';
     previewSingleText.classList.toggle('is-empty', !text);
   }
   function applySingleLineTransition(text){
