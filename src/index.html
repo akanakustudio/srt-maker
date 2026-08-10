@@ -230,6 +230,9 @@
     --preview-shadow-blur: 22px;
     --preview-bg-size: contain;
     --preview-bg-position: 50% 50%;
+    --preview-text-justify: center;
+    --preview-text-align-items: center;
+    --preview-text-halign: center;
   }
   .preview-panel .panel-head{padding:14px 16px 0;margin-bottom:0;}
   .preview-toggle-group{display:flex;gap:14px;flex-wrap:wrap;}
@@ -334,19 +337,27 @@
 
   .preview-single{
     position:relative;z-index:2;height:100%;
-    display:flex;align-items:center;justify-content:center;
+    display:flex;
+    align-items:var(--preview-text-align-items, center);
+    justify-content:var(--preview-text-justify, center);
     padding:28px 20px;background:transparent;
   }
   .preview-single-text{
     font-family:var(--preview-font-family);
     font-size:var(--preview-single-size);font-weight:var(--preview-font-weight);
     font-style:var(--preview-font-style);
-    text-align:center;color:var(--text);
+    text-align:var(--preview-text-halign, center);color:var(--text);
     line-height:var(--preview-line-height);letter-spacing:var(--preview-letter-spacing);
     text-shadow:0 0 var(--preview-shadow-blur) var(--preview-shadow-color);
     -webkit-text-stroke:var(--preview-stroke-width) var(--preview-stroke-color);
     word-break:break-word;
+    transition:opacity var(--preview-transition-duration, .22s) ease, transform var(--preview-transition-duration, .22s) ease;
+    opacity:1;transform:none;
   }
+  .preview-single-text.transition-out{opacity:0;}
+  .preview-single-text.transition-out[data-effect="slide-up"]{transform:translateY(-16px);}
+  .preview-single-text.transition-out[data-effect="slide-down"]{transform:translateY(16px);}
+  .preview-single-text.transition-out[data-effect="zoom"]{transform:scale(.82);}
   .preview-single-text.is-empty{
     color:var(--muted2);font-size:15px;font-weight:400;font-style:normal;
     text-shadow:none;-webkit-text-stroke:0 transparent;
@@ -364,6 +375,7 @@
   }
   .preview-line.meta{color:var(--meta);font-size:11.5px;font-style:italic;margin-top:8px;}
   .preview-line.active{color:var(--accent);background:rgba(51,214,192,.1);}
+  .preview-all.highlight-text-only .preview-line.active{background:transparent;}
   .preview-empty{text-align:center;color:var(--muted2);font-size:13px;padding:20px;}
 
   /* ---------- Footer ---------- */
@@ -496,6 +508,10 @@
             <button class="toggle-btn" type="button" id="previewRatioVertical" data-ratio="vertical">縦動画 (9:16)</button>
             <button class="toggle-btn" type="button" id="previewRatioHorizontal" data-ratio="horizontal">横動画 (16:9)</button>
           </div>
+          <div class="preview-toggle">
+            <button class="toggle-btn active" type="button" id="highlightModeLine" data-highlight="line">行全体をハイライト</button>
+            <button class="toggle-btn" type="button" id="highlightModeText" data-highlight="text">文字のみハイライト</button>
+          </div>
         </div>
       </div>
       <div class="style-io-controls" id="styleIoControls">
@@ -594,6 +610,40 @@
         <label class="preview-control">
           <span>影の強さ</span>
           <input type="range" id="fontShadowStrength" min="0" max="1" step="0.05" value="0.55">
+        </label>
+        <label class="preview-control">
+          <span>文字横位置</span>
+          <select id="textPosX">
+            <option value="left">左</option>
+            <option value="center" selected>中央</option>
+            <option value="right">右</option>
+          </select>
+        </label>
+        <label class="preview-control">
+          <span>文字縦位置</span>
+          <select id="textPosY">
+            <option value="top">上</option>
+            <option value="center" selected>中央</option>
+            <option value="bottom">下</option>
+          </select>
+        </label>
+        <label class="preview-control">
+          <span>切替エフェクト</span>
+          <select id="lineTransitionEffect">
+            <option value="none" selected>なし</option>
+            <option value="fade">フェード</option>
+            <option value="slide-up">スライド（上へ）</option>
+            <option value="slide-down">スライド（下へ）</option>
+            <option value="zoom">ズーム</option>
+          </select>
+        </label>
+        <label class="preview-control">
+          <span>フェードイン(秒)</span>
+          <input type="range" id="transitionInDuration" min="0.05" max="1" step="0.05" value="0.22">
+        </label>
+        <label class="preview-control">
+          <span>フェードアウト(秒)</span>
+          <input type="range" id="transitionOutDuration" min="0.05" max="1" step="0.05" value="0.22">
         </label>
       </div>
       <div class="eq-controls" id="eqControls">
@@ -816,6 +866,13 @@
   const fontStrokeColorInput = document.getElementById('fontStrokeColor');
   const fontShadowColorInput = document.getElementById('fontShadowColor');
   const fontShadowStrengthInput = document.getElementById('fontShadowStrength');
+  const textPosXSelect = document.getElementById('textPosX');
+  const textPosYSelect = document.getElementById('textPosY');
+  const lineTransitionSelect = document.getElementById('lineTransitionEffect');
+  const transitionInDurationInput = document.getElementById('transitionInDuration');
+  const transitionOutDurationInput = document.getElementById('transitionOutDuration');
+  const highlightModeLineBtn = document.getElementById('highlightModeLine');
+  const highlightModeTextBtn = document.getElementById('highlightModeText');
   const previewStageOuter = document.getElementById('previewStageOuter');
   const previewStage = document.getElementById('previewStage');
   const previewBg = document.getElementById('previewBg');
@@ -853,6 +910,7 @@
   let previewLineEls = {};      // idx -> element, for the "all" view
   let previewActiveIdx = -1;
   let previewBgUrl = null;
+  let currentBgFile = null;
 
   const SYSTEM_FONTS = [
     { key:'sans', label:'ゴシック（システム）', css: "-apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', 'Segoe UI', sans-serif" },
@@ -1022,6 +1080,12 @@
     previewPanel.style.setProperty('--preview-stroke-color', parseFloat(fontStrokeWidthInput.value) > 0 ? fontStrokeColorInput.value : 'transparent');
     previewPanel.style.setProperty('--preview-shadow-color', hexToRgba(fontShadowColorInput.value, fontShadowStrengthInput.value));
     previewPanel.style.setProperty('--preview-shadow-blur', (fontShadowStrengthInput.value * 40) + 'px');
+
+    const justifyMap = { left: 'flex-start', center: 'center', right: 'flex-end' };
+    const alignMap = { top: 'flex-start', center: 'center', bottom: 'flex-end' };
+    previewPanel.style.setProperty('--preview-text-justify', justifyMap[textPosXSelect.value] || 'center');
+    previewPanel.style.setProperty('--preview-text-align-items', alignMap[textPosYSelect.value] || 'center');
+    previewPanel.style.setProperty('--preview-text-halign', textPosXSelect.value === 'left' ? 'left' : textPosXSelect.value === 'right' ? 'right' : 'center');
   }
 
   previewFontFamilySelect.addEventListener('change', function(){
@@ -1047,7 +1111,17 @@
   [fontLetterSpacingInput, fontLineHeightInput, fontStrokeWidthInput, fontStrokeColorInput, fontShadowColorInput, fontShadowStrengthInput].forEach(function(el){
     el.addEventListener('input', applyPreviewStyle);
   });
+  [textPosXSelect, textPosYSelect].forEach(function(el){
+    el.addEventListener('change', applyPreviewStyle);
+  });
   applyPreviewStyle();
+
+  [highlightModeLineBtn, highlightModeTextBtn].forEach(function(btn){
+    btn.addEventListener('click', function(){
+      [highlightModeLineBtn, highlightModeTextBtn].forEach(function(b){ b.classList.toggle('active', b === btn); });
+      previewAll.classList.toggle('highlight-text-only', btn === highlightModeTextBtn);
+    });
+  });
 
   /* ===================== Preview background image ===================== */
   function applyBgTransform(){
@@ -1098,6 +1172,7 @@
     if(!file) return;
     if(previewBgUrl) URL.revokeObjectURL(previewBgUrl);
     previewBgUrl = URL.createObjectURL(file);
+    currentBgFile = file;
     previewBg.style.backgroundImage = 'url(' + previewBgUrl + ')';
     previewBg.classList.add('has-image');
     previewBgClearBtn.disabled = false;
@@ -1107,6 +1182,7 @@
   previewBgClearBtn.addEventListener('click', function(){
     if(previewBgUrl) URL.revokeObjectURL(previewBgUrl);
     previewBgUrl = null;
+    currentBgFile = null;
     previewBg.style.backgroundImage = '';
     previewBg.classList.remove('has-image');
     previewBgClearBtn.disabled = true;
@@ -1152,7 +1228,14 @@
   // How much to boost higher-frequency bars: music energy naturally rolls off
   // toward the high end, so without this the right side of the display reads
   // as flat/unreactive even though there is audible (quieter) high-frequency content.
-  const EQ_HIGH_FREQ_BOOST = 1.6;
+  const EQ_HIGH_FREQ_BOOST = 2.2;
+  // Perceptual (gamma) compression applied before the boost: linear byte-value
+  // scaling makes genuinely-present-but-quiet frequency content (most real music's
+  // treble, or anything near a bar's start/end) look like a dead gap, especially
+  // in circular/radial layouts where bar 0 and the last bar sit right next to each
+  // other. An exponent < 1 lifts quiet content much more than loud content, closer
+  // to how loudness is perceived and how commercial visualizers scale their bars.
+  const EQ_GAMMA = 0.55;
 
   function ensureAudioGraph(){
     if(audioCtx) return;
@@ -1202,6 +1285,11 @@
   function getBarValues(barCount){
     const values = new Array(barCount);
     const bins = eqDataArray.length;
+    // Bin 0 is the DC / 0Hz component, which carries no audio signal and reads
+    // as ~silent in getByteFrequencyData — mapping it into bar 0 made the very
+    // first bar (the top of the circle in circular/radial layouts) look like a
+    // permanent gap. Skip it and distribute the log scale across bins[1..bins).
+    const usableBins = Math.max(1, bins - 1);
     let prevEnd = 0;
     for(let i = 0; i < barCount; i++){
       // Logarithmic bin range per bar (like a real spectrum analyzer): narrow,
@@ -1209,12 +1297,13 @@
       // the treble end, matching how both music energy and human hearing are
       // distributed across the spectrum.
       const t1 = (i + 1) / barCount;
-      let end = Math.round(Math.pow(bins, t1));
-      end = Math.min(bins, Math.max(prevEnd + 1, end));
+      let end = Math.round(Math.pow(usableBins, t1));
+      end = Math.min(usableBins, Math.max(prevEnd + 1, end));
       let peak = 0;
-      for(let j = prevEnd; j < end; j++){ if(eqDataArray[j] > peak) peak = eqDataArray[j]; }
+      for(let j = prevEnd; j < end; j++){ if(eqDataArray[j + 1] > peak) peak = eqDataArray[j + 1]; }
       const boost = 1 + (i / (barCount - 1 || 1)) * (EQ_HIGH_FREQ_BOOST - 1);
-      values[i] = Math.min(1, (peak / 255) * boost);
+      const norm = Math.pow(peak / 255, EQ_GAMMA);
+      values[i] = Math.min(1, norm * boost);
       prevEnd = end;
     }
     return values;
@@ -1614,7 +1703,12 @@
         strokeWidth: fontStrokeWidthInput.value,
         strokeColor: fontStrokeColorInput.value,
         shadowColor: fontShadowColorInput.value,
-        shadowStrength: fontShadowStrengthInput.value
+        shadowStrength: fontShadowStrengthInput.value,
+        textPosX: textPosXSelect.value,
+        textPosY: textPosYSelect.value,
+        transitionEffect: lineTransitionSelect.value,
+        transitionInDuration: transitionInDurationInput.value,
+        transitionOutDuration: transitionOutDurationInput.value
       },
       background: {
         sizeMode: bgSizeModeSelect.value,
@@ -1622,6 +1716,7 @@
         posX: bgPosXInput.value,
         posY: bgPosYInput.value
       },
+      highlightMode: previewAll.classList.contains('highlight-text-only') ? 'text' : 'line',
       eq: eqStyle
     };
   }
@@ -1662,6 +1757,14 @@
     if(/^#[0-9a-fA-F]{6}$/.test(font.strokeColor)) fontStrokeColorInput.value = font.strokeColor;
     if(/^#[0-9a-fA-F]{6}$/.test(font.shadowColor)) fontShadowColorInput.value = font.shadowColor;
     if(typeof font.shadowStrength !== 'undefined') fontShadowStrengthInput.value = clampInputValue(fontShadowStrengthInput, font.shadowStrength, fontShadowStrengthInput.value);
+    if(['left','center','right'].indexOf(font.textPosX) !== -1) textPosXSelect.value = font.textPosX;
+    if(['top','center','bottom'].indexOf(font.textPosY) !== -1) textPosYSelect.value = font.textPosY;
+    if(['none','fade','slide-up','slide-down','zoom'].indexOf(font.transitionEffect) !== -1) lineTransitionSelect.value = font.transitionEffect;
+    if(typeof font.transitionInDuration !== 'undefined') transitionInDurationInput.value = clampInputValue(transitionInDurationInput, font.transitionInDuration, transitionInDurationInput.value);
+    if(typeof font.transitionOutDuration !== 'undefined') transitionOutDurationInput.value = clampInputValue(transitionOutDurationInput, font.transitionOutDuration, transitionOutDurationInput.value);
+
+    if(obj.highlightMode === 'text') highlightModeTextBtn.click();
+    else if(obj.highlightMode === 'line') highlightModeLineBtn.click();
 
     const bg = obj.background || {};
     const bgModeOptionExists = Array.prototype.some.call(bgSizeModeSelect.options, function(o){ return o.value === bg.sizeMode; });
@@ -1827,6 +1930,19 @@
     }
   }
 
+  function getSingleLineFadeAlpha(activeIdx){
+    const effect = lineTransitionSelect.value;
+    if(effect === 'none' || activeIdx === -1) return 1;
+    const line = lyricsLines[activeIdx];
+    if(!line || line.start === null || line.end === null) return 1;
+    const t = audioEl.currentTime;
+    const inDur = Math.max(0.02, parseFloat(transitionInDurationInput.value) || 0.22);
+    const outDur = Math.max(0.02, parseFloat(transitionOutDurationInput.value) || 0.22);
+    const inAlpha = clamp((t - line.start) / inDur, 0, 1);
+    const outAlpha = clamp((line.end - t) / outDur, 0, 1);
+    return Math.min(inAlpha, outAlpha);
+  }
+
   function drawRecordSingleLine(ctx, w, h, activeIdx, scale){
     scale = scale || 1;
     const theme = getThemeColors();
@@ -1834,32 +1950,42 @@
     const sizePx = getCurrentFontSizePx('single') * scale;
     const line = activeIdx !== -1 ? lyricsLines[activeIdx] : null;
     const text = line ? stripMetaTags(line.text) : '';
+    const padding = 20 * scale;
+    const hAlign = textPosXSelect.value, vAlign = textPosYSelect.value;
+    const anchorX = hAlign === 'left' ? padding : hAlign === 'right' ? (w - padding) : w / 2;
+    const canvasAlign = hAlign === 'left' ? 'left' : hAlign === 'right' ? 'right' : 'center';
+
     ctx.save();
-    ctx.textAlign = 'center';
+    ctx.globalAlpha = getSingleLineFadeAlpha(activeIdx);
+    ctx.textAlign = canvasAlign;
     ctx.textBaseline = 'middle';
     if(!text){
       ctx.font = '400 ' + (15 * scale) + 'px ' + cfg.familyVar;
       ctx.fillStyle = theme.muted2;
-      ctx.fillText('♪', w/2, h/2);
+      const emptyY = vAlign === 'top' ? padding + (15 * scale) / 2 : vAlign === 'bottom' ? h - padding - (15 * scale) / 2 : h / 2;
+      ctx.fillText('♪', anchorX, emptyY);
       ctx.restore();
       return;
     }
     ctx.font = (cfg.italic ? 'italic ' : '') + cfg.weight + ' ' + sizePx + 'px ' + cfg.familyVar;
     if('letterSpacing' in ctx) ctx.letterSpacing = (cfg.letterSpacingEm * sizePx) + 'px';
     const lineHeight = sizePx * cfg.lineHeightRatio;
-    const lines = wrapTextLines(ctx, text, w - 40 * scale);
+    const lines = wrapTextLines(ctx, text, w - padding * 2);
     const totalH = lines.length * lineHeight;
-    let y = h/2 - totalH/2 + lineHeight/2;
+    let y;
+    if(vAlign === 'top') y = padding + lineHeight / 2;
+    else if(vAlign === 'bottom') y = h - padding - totalH + lineHeight / 2;
+    else y = h / 2 - totalH / 2 + lineHeight / 2;
     ctx.shadowColor = cfg.shadowColor;
     ctx.shadowBlur = cfg.shadowBlur * scale;
     lines.forEach(function(ln){
       if(cfg.strokeWidth > 0){
         ctx.lineWidth = cfg.strokeWidth * 2 * scale;
         ctx.strokeStyle = cfg.strokeColor;
-        ctx.strokeText(ln, w/2, y);
+        ctx.strokeText(ln, anchorX, y);
       }
       ctx.fillStyle = theme.text;
-      ctx.fillText(ln, w/2, y);
+      ctx.fillText(ln, anchorX, y);
       y += lineHeight;
     });
     ctx.restore();
@@ -2545,12 +2671,53 @@
       previewToggleBtns.forEach(function(b){ b.classList.toggle('active', b === btn); });
       previewSingle.style.display = previewMode === 'single' ? '' : 'none';
       previewAll.style.display = previewMode === 'all' ? '' : 'none';
-      if(previewMode === 'all' && previewLineEls[previewActiveIdx]){
-        previewLineEls[previewActiveIdx].scrollIntoView({block:'center'});
-      }
+      if(previewMode === 'all') startPreviewScrollLoop();
       if(eqEnabled) resizeEqCanvas();
     });
   });
+
+  // Continuously glides the 全体表示 list so the current playback position flows
+  // smoothly between lines (interpolated by time), instead of jumping only when
+  // the highlighted line changes.
+  let previewScrollRAF = null;
+  function centerOffsetFor(el){
+    return el.offsetTop - (previewAll.clientHeight / 2) + (el.clientHeight / 2);
+  }
+  function updatePreviewAllScroll(){
+    const entries = [];
+    lyricsLines.forEach(function(line, idx){
+      if(line.isMeta || line.isBlank || line.start === null) return;
+      const el = previewLineEls[idx];
+      if(!el) return;
+      entries.push({ start: line.start, el: el });
+    });
+    if(entries.length === 0) return;
+    entries.sort(function(a, b){ return a.start - b.start; });
+    const t = audioEl.currentTime;
+    let target;
+    if(t <= entries[0].start){
+      target = centerOffsetFor(entries[0].el);
+    } else if(t >= entries[entries.length - 1].start){
+      target = centerOffsetFor(entries[entries.length - 1].el);
+    } else {
+      let i = 0;
+      while(i < entries.length - 1 && !(entries[i].start <= t && t < entries[i + 1].start)) i++;
+      const a = entries[i], b = entries[i + 1];
+      const aY = centerOffsetFor(a.el), bY = centerOffsetFor(b.el);
+      const frac = (t - a.start) / ((b.start - a.start) || 1);
+      target = aY + (bY - aY) * frac;
+    }
+    previewAll.scrollTop = target;
+  }
+  function previewScrollLoop(){
+    if(previewMode !== 'all'){ previewScrollRAF = null; return; }
+    updatePreviewAllScroll();
+    previewScrollRAF = requestAnimationFrame(previewScrollLoop);
+  }
+  function startPreviewScrollLoop(){
+    if(previewScrollRAF) return;
+    previewScrollRAF = requestAnimationFrame(previewScrollLoop);
+  }
 
   previewRatioBtns.forEach(function(btn){
     btn.addEventListener('click', function(){
@@ -2583,6 +2750,7 @@
       empty.textContent = '歌詞を読み込むとここに表示されます';
       previewAll.appendChild(empty);
     }
+    if(previewMode === 'all') startPreviewScrollLoop();
   }
 
   function getActiveLineIndex(){
@@ -2595,20 +2763,40 @@
     return -1;
   }
 
-  function updateLyricsPreview(activeIdx){
-    const line = activeIdx !== -1 ? lyricsLines[activeIdx] : null;
-    const text = line ? stripMetaTags(line.text) : '';
+  let lineTransitionTimer = null;
+  function setSingleLineContent(text){
     previewSingleText.textContent = text || '♪';
     previewSingleText.classList.toggle('is-empty', !text);
+  }
+  function applySingleLineTransition(text){
+    const effect = lineTransitionSelect.value;
+    if(lineTransitionTimer){ clearTimeout(lineTransitionTimer); lineTransitionTimer = null; }
+    if(effect === 'none'){
+      setSingleLineContent(text);
+      return;
+    }
+    const outDur = Math.max(0.02, parseFloat(transitionOutDurationInput.value) || 0.22);
+    const inDur = Math.max(0.02, parseFloat(transitionInDurationInput.value) || 0.22);
+    previewSingleText.dataset.effect = effect;
+    previewPanel.style.setProperty('--preview-transition-duration', outDur + 's');
+    previewSingleText.classList.add('transition-out');
+    lineTransitionTimer = setTimeout(function(){
+      setSingleLineContent(text);
+      previewPanel.style.setProperty('--preview-transition-duration', inDur + 's');
+      void previewSingleText.offsetWidth; // force reflow so the "in" transition actually animates
+      previewSingleText.classList.remove('transition-out');
+      lineTransitionTimer = null;
+    }, outDur * 1000);
+  }
 
+  function updateLyricsPreview(activeIdx){
     if(previewActiveIdx !== activeIdx){
+      const line = activeIdx !== -1 ? lyricsLines[activeIdx] : null;
+      const text = line ? stripMetaTags(line.text) : '';
+      applySingleLineTransition(text);
+
       if(previewLineEls[previewActiveIdx]) previewLineEls[previewActiveIdx].classList.remove('active');
-      if(previewLineEls[activeIdx]){
-        previewLineEls[activeIdx].classList.add('active');
-        if(previewMode === 'all'){
-          previewLineEls[activeIdx].scrollIntoView({block:'center', behavior:'smooth'});
-        }
-      }
+      if(previewLineEls[activeIdx]) previewLineEls[activeIdx].classList.add('active');
       previewActiveIdx = activeIdx;
     }
   }
@@ -2665,6 +2853,7 @@
       currentIndex = next;
       renderTable();
       if(next !== -1) scrollRowIntoView(next);
+      scheduleSaveSession();
     }
   }
 
@@ -2751,8 +2940,124 @@
     setStatus(entries.length + '行のSRTファイルを保存しました（メタタグは除去済み）', 'ok');
   });
 
+  /* ===================== Session persistence (survive page reload) ===================== */
+  const SESSION_DB_NAME = 'srt-maker-session';
+  const SESSION_DB_VERSION = 1;
+  const SESSION_STORE = 'state';
+  const SESSION_KEY = 'session';
+  let sessionDbPromise = null;
+  let saveSessionTimer = null;
+  let sessionRestoring = false;
+
+  function openSessionDb(){
+    if(typeof indexedDB === 'undefined') return Promise.reject(new Error('IndexedDB unavailable'));
+    if(sessionDbPromise) return sessionDbPromise;
+    sessionDbPromise = new Promise(function(resolve, reject){
+      const req = indexedDB.open(SESSION_DB_NAME, SESSION_DB_VERSION);
+      req.onupgradeneeded = function(){ req.result.createObjectStore(SESSION_STORE); };
+      req.onsuccess = function(){ resolve(req.result); };
+      req.onerror = function(){ reject(req.error); };
+    });
+    return sessionDbPromise;
+  }
+
+  function saveSessionState(){
+    return openSessionDb().then(function(db){
+      return new Promise(function(resolve, reject){
+        const tx = db.transaction(SESSION_STORE, 'readwrite');
+        tx.objectStore(SESSION_STORE).put({
+          version: 1,
+          savedAt: Date.now(),
+          audioFile: currentAudioFile || null,
+          audioFileName: audioFileName.textContent,
+          bgImageFile: currentBgFile || null,
+          lyricsFileName: lyricsFileName.textContent,
+          lyricsLines: lyricsLines,
+          uid: uid,
+          previewSettings: getFullPreviewSettings()
+        }, SESSION_KEY);
+        tx.oncomplete = function(){ resolve(); };
+        tx.onerror = function(){ reject(tx.error); };
+      });
+    });
+  }
+
+  function scheduleSaveSession(){
+    if(sessionRestoring) return; // don't overwrite the saved session while we're still loading it
+    if(saveSessionTimer) clearTimeout(saveSessionTimer);
+    saveSessionTimer = setTimeout(function(){
+      saveSessionTimer = null;
+      saveSessionState().catch(function(err){ console.warn('[srt-maker] 自動保存に失敗しました', err); });
+    }, 800);
+  }
+
+  function restoreSessionState(){
+    return openSessionDb().then(function(db){
+      return new Promise(function(resolve, reject){
+        const tx = db.transaction(SESSION_STORE, 'readonly');
+        const req = tx.objectStore(SESSION_STORE).get(SESSION_KEY);
+        req.onsuccess = function(){ resolve(req.result || null); };
+        req.onerror = function(){ reject(req.error); };
+      });
+    }).then(function(record){
+      if(!record) return;
+      sessionRestoring = true;
+      let restoredSomething = false;
+
+      if(Array.isArray(record.lyricsLines) && record.lyricsLines.length){
+        lyricsLines = record.lyricsLines;
+        uid = record.uid || (Math.max.apply(null, lyricsLines.map(function(l){ return l.id; })) + 1);
+        if(record.lyricsFileName) lyricsFileName.textContent = record.lyricsFileName;
+        currentIndex = firstTimeableIndex(0);
+        renderTable();
+        restoredSomething = true;
+      }
+
+      if(record.audioFile){
+        if(currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
+        currentAudioFile = record.audioFile;
+        const url = URL.createObjectURL(record.audioFile);
+        currentAudioUrl = url;
+        audioEl.src = url;
+        audioEl.load();
+        audioFileName.textContent = record.audioFileName || audioFileName.textContent;
+        restoredSomething = true;
+      }
+
+      if(record.bgImageFile){
+        if(previewBgUrl) URL.revokeObjectURL(previewBgUrl);
+        currentBgFile = record.bgImageFile;
+        previewBgUrl = URL.createObjectURL(record.bgImageFile);
+        previewBg.style.backgroundImage = 'url(' + previewBgUrl + ')';
+        previewBg.classList.add('has-image');
+        previewBgClearBtn.disabled = false;
+        loadPreviewBgImage(record.bgImageFile);
+        restoredSomething = true;
+      }
+
+      if(record.previewSettings){
+        applyFullPreviewSettings(record.previewSettings);
+        restoredSomething = true;
+      }
+
+      sessionRestoring = false;
+      if(restoredSomething) setStatus('前回の作業内容を復元しました', 'ok');
+    }).catch(function(err){
+      sessionRestoring = false;
+      console.warn('[srt-maker] セッションの復元に失敗しました', err);
+    });
+  }
+
+  // Blanket, delegated autosave trigger: catches virtually every relevant edit
+  // (table cells, all preview-setting inputs/selects, toggle buttons) without
+  // having to wire each control individually.
+  document.addEventListener('input', scheduleSaveSession);
+  document.addEventListener('change', scheduleSaveSession);
+  document.addEventListener('click', scheduleSaveSession);
+
   /* ===================== init ===================== */
   renderTable();
+  restoreSessionState();
 })();
 </script>
 </body>
