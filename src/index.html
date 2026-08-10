@@ -639,6 +639,11 @@
           <span>フェードアウト(秒)</span>
           <input type="range" id="transitionOutDuration" min="0.05" max="1" step="0.05" value="0.22">
         </label>
+        <label class="preview-control" title="切替エフェクトのせいで歌詞表示が遅れて見える場合に調整してください。プラスで表示を早める、マイナスで遅らせます">
+          <span>歌詞オフセット(秒)</span>
+          <input type="range" id="lyricsOffsetRange" min="-2" max="2" step="0.05" value="0">
+          <input type="number" id="lyricsOffsetNumber" min="-2" max="2" step="0.05" value="0">
+        </label>
       </div>
       <div class="eq-controls" id="eqControls">
         <label class="preview-control">
@@ -676,6 +681,10 @@
         <label class="preview-control">
           <span>なめらかさ</span>
           <input type="range" id="eqSmoothing" min="0" max="0.95" step="0.05" value="0.8">
+        </label>
+        <label class="preview-control" title="曲が静かでEQがあまり動かない時は上げてください">
+          <span>感度（基準レベル）</span>
+          <input type="range" id="eqSensitivity" min="0.5" max="3" step="0.1" value="1">
         </label>
         <label class="preview-control">
           <span>グロー</span>
@@ -878,6 +887,8 @@
   const lineTransitionSelect = document.getElementById('lineTransitionEffect');
   const transitionInDurationInput = document.getElementById('transitionInDuration');
   const transitionOutDurationInput = document.getElementById('transitionOutDuration');
+  const lyricsOffsetRange = document.getElementById('lyricsOffsetRange');
+  const lyricsOffsetNumber = document.getElementById('lyricsOffsetNumber');
   const highlightModeLineBtn = document.getElementById('highlightModeLine');
   const highlightModeTextBtn = document.getElementById('highlightModeText');
   const previewStageOuter = document.getElementById('previewStageOuter');
@@ -902,6 +913,7 @@
   const eqBarCountInput = document.getElementById('eqBarCount');
   const eqSmoothingInput = document.getElementById('eqSmoothing');
   const eqGlowInput = document.getElementById('eqGlow');
+  const eqSensitivityInput = document.getElementById('eqSensitivity');
   const eqPosXSelect = document.getElementById('eqPosX');
   const eqPosYSelect = document.getElementById('eqPosY');
   const eqWidthInput = document.getElementById('eqWidth');
@@ -1132,6 +1144,26 @@
   linkRangeAndNumber(textPosYRange, textPosYNumber);
   applyPreviewStyle();
 
+  // Global lyrics timing offset: when a line-transition effect (fade etc.) is
+  // enabled, the visible text doesn't fully appear until partway through its
+  // fade-in, which reads as the lyrics lagging behind the vocal. Rather than
+  // re-timing every line, this shifts what counts as "the active line" (and
+  // where 歌詞全体表示 scrolls to) by a fixed amount — it does not touch the
+  // actual start/end values stored on each line, so the saved .srt stays exact.
+  function getLyricsOffsetSec(){
+    const v = parseFloat(lyricsOffsetNumber.value);
+    return isNaN(v) ? 0 : v;
+  }
+  lyricsOffsetRange.addEventListener('input', function(){
+    lyricsOffsetNumber.value = lyricsOffsetRange.value;
+    updatePreviewHighlight();
+  });
+  lyricsOffsetNumber.addEventListener('input', function(){
+    const v = clamp(parseFloat(lyricsOffsetNumber.value) || 0, -2, 2);
+    lyricsOffsetRange.value = v;
+    updatePreviewHighlight();
+  });
+
   [highlightModeLineBtn, highlightModeTextBtn].forEach(function(btn){
     btn.addEventListener('click', function(){
       [highlightModeLineBtn, highlightModeTextBtn].forEach(function(b){ b.classList.toggle('active', b === btn); });
@@ -1295,7 +1327,7 @@
   let eqEnabled = false;
   let eqRAF = null;
 
-  const EQ_TYPES = ['bars', 'mirror', 'wave', 'circular', 'dots', 'led', 'radialDots', 'oscilloscope'];
+  const EQ_TYPES = ['bars', 'mirror', 'wave', 'circular', 'dots', 'led', 'radialDots', 'polygon', 'rays', 'ripple', 'particles', 'orb', 'smoothline', 'auraring', 'oscilloscope'];
   let eqStyle = {
     type: 'bars',
     colorStart: '#7fe9db',
@@ -1306,7 +1338,8 @@
     posX: 'center',
     posY: 'center',
     width: 100,
-    height: 100
+    height: 100,
+    sensitivity: 1.5
   };
 
   function clamp(v, min, max){ return Math.min(max, Math.max(min, v)); }
@@ -1399,7 +1432,11 @@
       let peak = 0;
       for(let j = prevEnd; j < end; j++){ if(eqDataArray[j + 1] > peak) peak = eqDataArray[j + 1]; }
       const boost = 1 + (i / (barCount - 1 || 1)) * (EQ_HIGH_FREQ_BOOST - 1);
-      const norm = Math.pow(peak / 255, EQ_GAMMA);
+      // sensitivity acts like an input-gain / reference-level knob, applied to
+      // the raw peak before the perceptual (gamma) compression below - lets
+      // quiet tracks be boosted so the EQ still visibly reacts to them.
+      const boostedPeak = Math.min(255, peak * eqStyle.sensitivity);
+      const norm = Math.pow(boostedPeak / 255, EQ_GAMMA);
       values[i] = Math.min(1, norm * boost);
       prevEnd = end;
     }
@@ -1845,7 +1882,7 @@
     const step = w / ((len - 1) || 1);
     ctx.beginPath();
     for(let i = 0; i < len; i++){
-      const v = data[i] / 128 - 1;
+      const v = clamp((data[i] / 128 - 1) * eqStyle.sensitivity, -1, 1);
       const x = i * step, y = h/2 + v * (h/2) * 0.9;
       if(i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
@@ -1939,6 +1976,7 @@
     eqColorEndInput.value = style.colorEnd;
     eqBarCountInput.value = style.barCount;
     eqSmoothingInput.value = style.smoothing;
+    eqSensitivityInput.value = style.sensitivity;
     eqGlowInput.value = style.glow;
     eqPosXSelect.value = style.posX;
     eqPosYSelect.value = style.posY;
@@ -1963,6 +2001,7 @@
     if(analyserNode) analyserNode.smoothingTimeConstant = eqStyle.smoothing;
   });
   eqGlowInput.addEventListener('input', function(){ eqStyle.glow = parseFloat(eqGlowInput.value); });
+  eqSensitivityInput.addEventListener('input', function(){ eqStyle.sensitivity = parseFloat(eqSensitivityInput.value); });
   eqPosXSelect.addEventListener('change', function(){ eqStyle.posX = eqPosXSelect.value; });
   eqPosYSelect.addEventListener('change', function(){ eqStyle.posY = eqPosYSelect.value; });
   eqWidthInput.addEventListener('input', function(){ eqStyle.width = parseInt(eqWidthInput.value, 10); });
@@ -1971,25 +2010,25 @@
   /* ---------- EQ style: mood auto-generation ---------- */
   const MOOD_PRESETS = [
     { label:'ダンス・中毒的', test: function(f){ return f.rms > 0.13 && f.zcr > 0.085; },
-      style:{ type:'ripple', colorStart:'#ff3d9a', colorEnd:'#7c3dff', barCount:48, smoothing:0.55, glow:0.85 } },
+      style:{ type:'ripple', colorStart:'#ff3d9a', colorEnd:'#7c3dff', barCount:48, smoothing:0.55, glow:0.85, sensitivity:1.1 } },
     { label:'ロック・アンセム', test: function(f){ return f.rms > 0.12 && f.dynamics > 0.5; },
-      style:{ type:'rays', colorStart:'#ff6a3d', colorEnd:'#ffd23d', barCount:40, smoothing:0.5, glow:0.75 } },
+      style:{ type:'rays', colorStart:'#ff6a3d', colorEnd:'#ffd23d', barCount:40, smoothing:0.5, glow:0.75, sensitivity:1.1 } },
     { label:'エネルギッシュ', test: function(f){ return f.rms > 0.10 && f.dynamics > 0.35; },
-      style:{ type:'mirror', colorStart:'#ff6a3d', colorEnd:'#ffd23d', barCount:48, smoothing:0.55, glow:0.7 } },
+      style:{ type:'mirror', colorStart:'#ff6a3d', colorEnd:'#ffd23d', barCount:48, smoothing:0.55, glow:0.7, sensitivity:1.2 } },
     { label:'シャープ・煌びやか', test: function(f){ return f.zcr > 0.09; },
-      style:{ type:'polygon', colorStart:'#7fe9ff', colorEnd:'#33d6c0', barCount:32, smoothing:0.6, glow:0.6 } },
+      style:{ type:'polygon', colorStart:'#7fe9ff', colorEnd:'#33d6c0', barCount:32, smoothing:0.6, glow:0.6, sensitivity:1.3 } },
     { label:'おしゃれ・都会的', test: function(f){ return f.zcr > 0.055; },
-      style:{ type:'smoothline', colorStart:'#ff9ecf', colorEnd:'#7fe9ff', barCount:36, smoothing:0.7, glow:0.5 } },
+      style:{ type:'smoothline', colorStart:'#ff9ecf', colorEnd:'#7fe9ff', barCount:36, smoothing:0.7, glow:0.5, sensitivity:1.4 } },
     { label:'アコースティック・優しい', test: function(f){ return f.rms < 0.07 && f.zcr < 0.05; },
-      style:{ type:'orb', colorStart:'#ffcf9e', colorEnd:'#ff9f6a', barCount:24, smoothing:0.85, glow:0.55 } },
+      style:{ type:'orb', colorStart:'#ffcf9e', colorEnd:'#ff9f6a', barCount:24, smoothing:0.85, glow:0.55, sensitivity:2.0 } },
     { label:'エレガント・ムーディー', test: function(f){ return f.dynamics < 0.4 && f.rms >= 0.08; },
-      style:{ type:'auraring', colorStart:'#c9a7ff', colorEnd:'#ff9ecf', barCount:28, smoothing:0.8, glow:0.65 } },
+      style:{ type:'auraring', colorStart:'#c9a7ff', colorEnd:'#ff9ecf', barCount:28, smoothing:0.8, glow:0.65, sensitivity:1.6 } },
     { label:'アンビエント・幻想的', test: function(f){ return f.rms < 0.05; },
-      style:{ type:'particles', colorStart:'#a78bfa', colorEnd:'#33d6c0', barCount:24, smoothing:0.85, glow:0.7 } },
+      style:{ type:'particles', colorStart:'#a78bfa', colorEnd:'#33d6c0', barCount:24, smoothing:0.85, glow:0.7, sensitivity:2.2 } },
     { label:'重厚・落ち着き', test: function(f){ return f.dynamics < 0.35; },
-      style:{ type:'circular', colorStart:'#ff9f6a', colorEnd:'#7a3320', barCount:40, smoothing:0.82, glow:0.5 } },
+      style:{ type:'circular', colorStart:'#ff9f6a', colorEnd:'#7a3320', barCount:40, smoothing:0.82, glow:0.5, sensitivity:1.5 } },
     { label:'バランス型', test: function(){ return true; },
-      style:{ type:'bars', colorStart:'#7fe9db', colorEnd:'#33d6c0', barCount:40, smoothing:0.8, glow:0.4 } }
+      style:{ type:'bars', colorStart:'#7fe9db', colorEnd:'#33d6c0', barCount:40, smoothing:0.8, glow:0.4, sensitivity:1.5 } }
   ];
 
   function pickMood(features){
@@ -2368,7 +2407,8 @@
       posX: ['left','center','right'].indexOf(obj.posX) !== -1 ? obj.posX : 'center',
       posY: ['top','center','bottom'].indexOf(obj.posY) !== -1 ? obj.posY : 'center',
       width: clamp(parseInt(obj.width, 10) || 100, 10, 100),
-      height: clamp(parseInt(obj.height, 10) || 100, 10, 100)
+      height: clamp(parseInt(obj.height, 10) || 100, 10, 100),
+      sensitivity: clamp(isNaN(parseFloat(obj.sensitivity)) ? 1.5 : parseFloat(obj.sensitivity), 0.5, 3)
     };
   }
 
@@ -2408,7 +2448,8 @@
         textPosY: textPosYNumber.value,
         transitionEffect: lineTransitionSelect.value,
         transitionInDuration: transitionInDurationInput.value,
-        transitionOutDuration: transitionOutDurationInput.value
+        transitionOutDuration: transitionOutDurationInput.value,
+        lyricsOffset: lyricsOffsetNumber.value
       },
       background: {
         sizeMode: bgSizeModeSelect.value,
@@ -2468,6 +2509,10 @@
     if(['none','fade','slide-up','slide-down','zoom'].indexOf(font.transitionEffect) !== -1) lineTransitionSelect.value = font.transitionEffect;
     if(typeof font.transitionInDuration !== 'undefined') transitionInDurationInput.value = clampInputValue(transitionInDurationInput, font.transitionInDuration, transitionInDurationInput.value);
     if(typeof font.transitionOutDuration !== 'undefined') transitionOutDurationInput.value = clampInputValue(transitionOutDurationInput, font.transitionOutDuration, transitionOutDurationInput.value);
+    if(typeof font.lyricsOffset !== 'undefined'){
+      lyricsOffsetNumber.value = clampInputValue(lyricsOffsetNumber, font.lyricsOffset, lyricsOffsetNumber.value);
+      lyricsOffsetRange.value = lyricsOffsetNumber.value;
+    }
 
     if(obj.highlightMode === 'text') highlightModeTextBtn.click();
     else if(obj.highlightMode === 'line') highlightModeLineBtn.click();
@@ -2639,7 +2684,7 @@
     if(effect === 'none' || activeIdx === -1) return 1;
     const line = lyricsLines[activeIdx];
     if(!line || line.start === null || line.end === null) return 1;
-    const t = audioEl.currentTime;
+    const t = audioEl.currentTime + getLyricsOffsetSec();
     const inDur = Math.max(0.02, parseFloat(transitionInDurationInput.value) || 0.22);
     const outDur = Math.max(0.02, parseFloat(transitionOutDurationInput.value) || 0.22);
     const inAlpha = clamp((t - line.start) / inDur, 0, 1);
@@ -3402,7 +3447,7 @@
     });
     if(entries.length === 0) return;
     entries.sort(function(a, b){ return a.start - b.start; });
-    const t = audioEl.currentTime;
+    const t = audioEl.currentTime + getLyricsOffsetSec();
     let target;
     if(t <= entries[0].start){
       target = centerOffsetFor(entries[0].el);
@@ -3463,7 +3508,7 @@
   }
 
   function getActiveLineIndex(){
-    const t = audioEl.currentTime;
+    const t = audioEl.currentTime + getLyricsOffsetSec();
     for(let i = 0; i < lyricsLines.length; i++){
       const l = lyricsLines[i];
       if(l.isMeta || l.isBlank) continue;
