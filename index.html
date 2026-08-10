@@ -332,6 +332,7 @@
     content:"";position:absolute;inset:0;background:rgba(8,10,13,0);transition:background .2s ease;
   }
   .preview-bg.has-image::after{background:rgba(8,10,13,.48);}
+  .preview-bg-video{position:absolute;top:0;left:0;object-fit:fill;}
   .preview-eq{position:absolute;inset:0;z-index:1;width:100%;height:100%;pointer-events:none;display:block;}
 
   .preview-single{
@@ -517,7 +518,7 @@
         <button class="toggle-btn" type="button" id="previewStyleSaveBtn">プレビュー設定を保存</button>
         <label class="toggle-btn" for="previewStyleLoadInput">プレビュー設定を読み込み</label>
         <input type="file" id="previewStyleLoadInput" accept=".json,application/json" style="display:none">
-        <span class="hint">フォント・背景・グラフィックイコライザーなど、歌詞プレビューの設定一式を保存/読み込みします（背景画像そのものは含みません）</span>
+        <span class="hint">フォント・背景・グラフィックイコライザーなど、歌詞プレビューの設定一式を保存/読み込みします（背景の画像・動画そのものは含みません）</span>
       </div>
       <div class="preview-controls">
         <label class="preview-control">
@@ -545,8 +546,8 @@
           <span>全体(px)</span>
           <input type="number" id="customFontSizeAll" min="8" max="120" step="1" value="14">
         </label>
-        <label class="toggle-btn" for="previewBgInput">背景画像を設定</label>
-        <input type="file" id="previewBgInput" accept="image/*" style="display:none">
+        <label class="toggle-btn" for="previewBgInput">背景を設定（画像/動画）</label>
+        <input type="file" id="previewBgInput" accept="image/*,video/*" style="display:none">
         <button class="toggle-btn" type="button" id="previewBgClearBtn" disabled>背景をクリア</button>
         <button class="toggle-btn" type="button" id="previewEqToggle">グラフィックイコライザー</button>
       </div>
@@ -650,6 +651,13 @@
             <option value="dots">ドット</option>
             <option value="led">LEDブロック</option>
             <option value="radialDots">放射ドット</option>
+            <option value="polygon">ポリゴン</option>
+            <option value="rays">スターバースト</option>
+            <option value="ripple">リップル</option>
+            <option value="particles">パーティクル</option>
+            <option value="orb">ブリージングオーブ</option>
+            <option value="smoothline">スムースライン</option>
+            <option value="auraring">オーラリング</option>
             <option value="oscilloscope">オシロスコープ</option>
           </select>
         </label>
@@ -721,7 +729,9 @@
       </div>
       <div class="preview-stage-outer" id="previewStageOuter">
         <div class="preview-stage" id="previewStage">
-          <div class="preview-bg" id="previewBg"></div>
+          <div class="preview-bg" id="previewBg">
+            <video class="preview-bg-video" id="previewBgVideo" muted loop playsinline style="display:none"></video>
+          </div>
           <canvas class="preview-eq" id="previewEqCanvas"></canvas>
           <div class="preview-single" id="previewSingle">
             <div class="preview-single-text is-empty" id="previewSingleText">—</div>
@@ -876,6 +886,7 @@
   const previewEqCanvas = document.getElementById('previewEqCanvas');
   const previewBgInput = document.getElementById('previewBgInput');
   const previewBgClearBtn = document.getElementById('previewBgClearBtn');
+  const previewBgVideo = document.getElementById('previewBgVideo');
   const bgSizeModeSelect = document.getElementById('bgSizeMode');
   const bgZoomInput = document.getElementById('bgZoom');
   const bgPosXInput = document.getElementById('bgPosX');
@@ -907,6 +918,7 @@
   let previewLineEls = {};      // idx -> element, for the "all" view
   let previewActiveIdx = -1;
   let previewBgUrl = null;
+  let currentBgKind = null; // 'image' | 'video' | null
   let currentBgFile = null;
 
   const SYSTEM_FONTS = [
@@ -1127,7 +1139,53 @@
     });
   });
 
-  /* ===================== Preview background image ===================== */
+  /* ===================== Preview background image/video ===================== */
+  // Shared by the on-screen video layout and the canvas export path below, so
+  // the two can never independently drift apart the way the image path once
+  // did (see the posX/posY falsy-zero bug fix) - both compute the exact same
+  // draw rect from the same mode/zoom/position inputs.
+  function computeBgDrawRect(w, h, iw, ih, mode, zoomPercent, posXPercent, posYPercent, scale){
+    scale = scale || 1;
+    let drawW, drawH;
+    if(mode === 'cover'){
+      const s = Math.max(w / iw, h / ih);
+      drawW = iw * s; drawH = ih * s;
+    } else if(mode === 'auto'){
+      drawW = iw * scale; drawH = ih * scale;
+    } else if(mode === 'zoom'){
+      const zoom = zoomPercent / 100;
+      drawW = w * zoom; drawH = drawW * (ih / iw);
+    } else {
+      const s = Math.min(w / iw, h / ih);
+      drawW = iw * s; drawH = ih * s;
+    }
+    const posX = posXPercent / 100, posY = posYPercent / 100;
+    return { w: drawW, h: drawH, x: (w - drawW) * posX, y: (h - drawH) * posY };
+  }
+
+  function applyBgVideoLayout(){
+    if(currentBgKind !== 'video') return;
+    const iw = previewBgVideo.videoWidth, ih = previewBgVideo.videoHeight;
+    if(!iw || !ih) return;
+    const stageRect = previewStage.getBoundingClientRect();
+    const w = stageRect.width, h = stageRect.height;
+    if(!w || !h) return;
+    const zoomRaw = parseFloat(bgZoomInput.value);
+    const posXRaw = parseFloat(bgPosXInput.value);
+    const posYRaw = parseFloat(bgPosYInput.value);
+    const rect = computeBgDrawRect(
+      w, h, iw, ih, bgSizeModeSelect.value,
+      isNaN(zoomRaw) ? 100 : zoomRaw,
+      isNaN(posXRaw) ? 50 : posXRaw,
+      isNaN(posYRaw) ? 50 : posYRaw,
+      1
+    );
+    previewBgVideo.style.width = rect.w + 'px';
+    previewBgVideo.style.height = rect.h + 'px';
+    previewBgVideo.style.left = rect.x + 'px';
+    previewBgVideo.style.top = rect.y + 'px';
+  }
+
   function applyBgTransform(){
     let sizeValue;
     switch(bgSizeModeSelect.value){
@@ -1138,12 +1196,23 @@
     }
     previewPanel.style.setProperty('--preview-bg-size', sizeValue);
     previewPanel.style.setProperty('--preview-bg-position', bgPosXInput.value + '% ' + bgPosYInput.value + '%');
+    applyBgVideoLayout();
   }
   bgSizeModeSelect.addEventListener('change', applyBgTransform);
   [bgZoomInput, bgPosXInput, bgPosYInput].forEach(function(el){
     el.addEventListener('input', applyBgTransform);
   });
   applyBgTransform();
+  previewBgVideo.addEventListener('loadedmetadata', applyBgVideoLayout);
+  if(typeof ResizeObserver !== 'undefined'){
+    new ResizeObserver(applyBgVideoLayout).observe(previewStage);
+  }
+  audioEl.addEventListener('play', function(){
+    if(currentBgKind === 'video') previewBgVideo.play().catch(function(){});
+  });
+  audioEl.addEventListener('pause', function(){
+    if(currentBgKind === 'video') previewBgVideo.pause();
+  });
 
   let previewBgImageEl = null; // an ImageBitmap (preferred) or HTMLImageElement (fallback)
   function loadPreviewBgImage(source){
@@ -1171,24 +1240,48 @@
     previewBgImageEl = img;
   }
 
-  previewBgInput.addEventListener('change', function(e){
-    const file = e.target.files[0];
-    if(!file) return;
+  function clearPreviewBgVideo(){
+    previewBgVideo.pause();
+    previewBgVideo.removeAttribute('src');
+    previewBgVideo.load();
+    previewBgVideo.style.display = 'none';
+  }
+
+  function setPreviewBgFile(file){
     if(previewBgUrl) URL.revokeObjectURL(previewBgUrl);
     previewBgUrl = URL.createObjectURL(file);
     currentBgFile = file;
-    previewBg.style.backgroundImage = 'url(' + previewBgUrl + ')';
+    currentBgKind = file.type.indexOf('video/') === 0 ? 'video' : 'image';
+    if(currentBgKind === 'video'){
+      previewBg.style.backgroundImage = '';
+      previewBgImageEl = null;
+      previewBgVideo.style.display = 'block';
+      previewBgVideo.src = previewBgUrl;
+      previewBgVideo.load();
+      previewBgVideo.play().catch(function(){});
+    } else {
+      clearPreviewBgVideo();
+      previewBg.style.backgroundImage = 'url(' + previewBgUrl + ')';
+      loadPreviewBgImage(file);
+    }
     previewBg.classList.add('has-image');
     previewBgClearBtn.disabled = false;
-    loadPreviewBgImage(file);
+  }
+
+  previewBgInput.addEventListener('change', function(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    setPreviewBgFile(file);
   });
 
   previewBgClearBtn.addEventListener('click', function(){
     if(previewBgUrl) URL.revokeObjectURL(previewBgUrl);
     previewBgUrl = null;
     currentBgFile = null;
+    currentBgKind = null;
     previewBg.style.backgroundImage = '';
     previewBg.classList.remove('has-image');
+    clearPreviewBgVideo();
     previewBgClearBtn.disabled = true;
     previewBgInput.value = '';
     loadPreviewBgImage(null);
@@ -1459,6 +1552,293 @@
     }
   }
 
+  // Rotating polygon connecting each bar's tip - a faceted, gem-like outline
+  // that suits sparkly/synth-driven tracks. Rotation is a pure function of
+  // wall-clock time (not accumulated per-call), so it stays correct even
+  // when both the live preview and the export canvas draw it in the same
+  // real-time tick during recording.
+  function drawEqPolygon(ctx, w, h){
+    const barCount = Math.max(6, eqStyle.barCount);
+    const values = getBarValues(barCount);
+    const cx = w / 2, cy = h / 2;
+    const baseRadius = Math.min(w, h) * 0.16;
+    const maxLen = Math.min(w, h) * 0.34;
+    const rotation = (performance.now() / 9000) % (Math.PI * 2);
+    ctx.beginPath();
+    for(let i = 0; i < barCount; i++){
+      const angle = (i / barCount) * Math.PI * 2 - Math.PI / 2 + rotation;
+      const len = baseRadius + values[i] * maxLen;
+      const x = cx + Math.cos(angle) * len, y = cy + Math.sin(angle) * len;
+      if(i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    const gradient = ctx.createLinearGradient(cx - maxLen, cy - maxLen, cx + maxLen, cy + maxLen);
+    gradient.addColorStop(0, hexToRgba(eqStyle.colorStart, 0.35));
+    gradient.addColorStop(1, hexToRgba(eqStyle.colorEnd, 0.08));
+    ctx.fillStyle = gradient;
+    ctx.fill();
+    ctx.strokeStyle = eqStyle.colorStart;
+    ctx.lineWidth = Math.max(1.5, Math.min(w, h) * 0.006);
+    ctx.stroke();
+  }
+
+  // Triangular spikes radiating from a glowing core - bold and aggressive,
+  // suits rock/anthem-style tracks. Slow rotation is time-based like the
+  // polygon style above.
+  function drawEqRays(ctx, w, h){
+    const barCount = eqStyle.barCount;
+    const values = getBarValues(barCount);
+    const cx = w / 2, cy = h / 2;
+    const baseRadius = Math.min(w, h) * 0.10;
+    const maxLen = Math.min(w, h) * 0.44;
+    const rotation = (performance.now() / 16000) % (Math.PI * 2);
+    let overall = 0;
+    for(let i = 0; i < barCount; i++){
+      const angle = (i / barCount) * Math.PI * 2 + rotation;
+      const len = baseRadius + values[i] * maxLen;
+      overall += values[i];
+      const spread = (Math.PI * 2 / barCount) * 0.32;
+      const bx1 = cx + Math.cos(angle - spread) * baseRadius, by1 = cy + Math.sin(angle - spread) * baseRadius;
+      const bx2 = cx + Math.cos(angle + spread) * baseRadius, by2 = cy + Math.sin(angle + spread) * baseRadius;
+      const tx = cx + Math.cos(angle) * len, ty = cy + Math.sin(angle) * len;
+      const gradient = ctx.createLinearGradient(cx, cy, tx, ty);
+      gradient.addColorStop(0, hexToRgba(eqStyle.colorStart, 0.9));
+      gradient.addColorStop(1, hexToRgba(eqStyle.colorEnd, 0.1));
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.moveTo(bx1, by1);
+      ctx.lineTo(tx, ty);
+      ctx.lineTo(bx2, by2);
+      ctx.closePath();
+      ctx.fill();
+    }
+    overall /= barCount;
+    const coreR = baseRadius * (0.6 + overall * 0.6);
+    const coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, coreR));
+    coreGrad.addColorStop(0, hexToRgba(eqStyle.colorStart, 0.9));
+    coreGrad.addColorStop(1, hexToRgba(eqStyle.colorStart, 0));
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(1, coreR), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Concentric rings pulsing outward on bass hits - energetic, "addictive"
+  // feel suited to dance/EDM tracks. Ring state is module-level (not local
+  // to one draw call) and timestamped in real ms, so both the preview loop
+  // and the export loop draw the exact same rings during recording instead
+  // of each accumulating their own independent set.
+  let eqRipplePulses = [];
+  let eqRippleLastSpawn = 0;
+  function drawEqRipple(ctx, w, h){
+    const barCount = eqStyle.barCount;
+    const values = getBarValues(barCount);
+    const bassLevel = (values[0] + (values[1] || 0) + (values[2] || 0)) / 3;
+    let overall = 0;
+    for(let i = 0; i < barCount; i++) overall += values[i];
+    overall /= barCount;
+    const now = performance.now();
+    const spawnInterval = 260;
+    if(now - eqRippleLastSpawn > spawnInterval && bassLevel > 0.18){
+      eqRippleLastSpawn = now;
+      eqRipplePulses.push({ born: now, energy: Math.min(1, bassLevel * 1.2) });
+      if(eqRipplePulses.length > 12) eqRipplePulses.shift();
+    }
+    const cx = w / 2, cy = h / 2;
+    const maxRadius = Math.min(w, h) * 0.46;
+    const lifeMs = 1500;
+    eqRipplePulses = eqRipplePulses.filter(function(p){ return now - p.born < lifeMs; });
+    eqRipplePulses.forEach(function(p){
+      const t = (now - p.born) / lifeMs;
+      const r = maxRadius * t;
+      const alpha = (1 - t) * 0.5 * p.energy;
+      ctx.strokeStyle = hexToRgba(eqStyle.colorStart, Math.max(0, alpha));
+      ctx.lineWidth = Math.max(1.5, Math.min(w, h) * 0.01 * (1 - t * 0.5));
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(1, r), 0, Math.PI * 2);
+      ctx.stroke();
+    });
+    const coreR = Math.min(w, h) * 0.10 * (0.7 + overall * 0.9);
+    const coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, coreR));
+    coreGrad.addColorStop(0, hexToRgba(eqStyle.colorEnd, 0.85));
+    coreGrad.addColorStop(1, hexToRgba(eqStyle.colorEnd, 0));
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(1, coreR), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Small sparks drifting upward and fading - soft, unobtrusive, suits
+  // acoustic/ballad tracks where the visual shouldn't compete with lyrics.
+  // Particle state is module-level and driven by real elapsed time for the
+  // same reason as the ripple pulses above.
+  let eqParticles = [];
+  let eqParticlesLastSpawn = 0;
+  let eqParticlesLastUpdate = 0;
+  function drawEqParticles(ctx, w, h){
+    const barCount = Math.min(24, eqStyle.barCount);
+    const values = getBarValues(barCount);
+    const now = performance.now();
+    if(!eqParticlesLastUpdate) eqParticlesLastUpdate = now;
+    const dt = Math.min(0.05, Math.max(0, (now - eqParticlesLastUpdate) / 1000));
+    eqParticlesLastUpdate = now;
+
+    if(now - eqParticlesLastSpawn > 40){
+      eqParticlesLastSpawn = now;
+      for(let i = 0; i < barCount; i++){
+        if(values[i] > 0.35 && Math.random() < values[i] * 0.5){
+          const x = (i + 0.5) / barCount * w + (Math.random() - 0.5) * (w / barCount);
+          eqParticles.push({
+            x: x, y: h * 0.92,
+            vy: -(30 + values[i] * 90),
+            vx: (Math.random() - 0.5) * 14,
+            life: 0, maxLife: 1.2 + Math.random() * 0.8,
+            size: 2 + values[i] * 4,
+            useStart: Math.random() < 0.5
+          });
+        }
+      }
+      if(eqParticles.length > 160) eqParticles.splice(0, eqParticles.length - 160);
+    }
+
+    eqParticles = eqParticles.filter(function(p){
+      p.life += dt;
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vy += 26 * dt;
+      return p.life < p.maxLife && p.y > -20;
+    });
+
+    eqParticles.forEach(function(p){
+      const t = p.life / p.maxLife;
+      const alpha = Math.max(0, 1 - t);
+      const color = p.useStart ? eqStyle.colorStart : eqStyle.colorEnd;
+      ctx.fillStyle = hexToRgba(color, alpha * 0.9);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(0.5, p.size * (1 - t * 0.3)), 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
+  // A single soft glowing orb that breathes size with overall volume - the
+  // most minimal/unobtrusive style, for quiet acoustic or ballad sections
+  // where the equalizer should barely register next to the lyrics.
+  let eqOrbSmoothedLevel = 0;
+  function drawEqOrb(ctx, w, h){
+    const barCount = eqStyle.barCount;
+    const values = getBarValues(barCount);
+    let overall = 0;
+    for(let i = 0; i < barCount; i++) overall += values[i];
+    overall /= barCount;
+    eqOrbSmoothedLevel += (overall - eqOrbSmoothedLevel) * 0.12;
+    const cx = w / 2, cy = h / 2;
+    const baseR = Math.min(w, h) * 0.14;
+    const r = baseR * (0.75 + eqOrbSmoothedLevel * 0.9);
+    for(let ring = 3; ring >= 1; ring--){
+      const ringR = r * (1 + ring * 0.35);
+      const alpha = 0.10 / ring;
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, ringR));
+      grad.addColorStop(0, hexToRgba(eqStyle.colorStart, alpha));
+      grad.addColorStop(1, hexToRgba(eqStyle.colorStart, 0));
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(1, ringR), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, r));
+    coreGrad.addColorStop(0, eqStyle.colorStart);
+    coreGrad.addColorStop(0.7, eqStyle.colorEnd);
+    coreGrad.addColorStop(1, hexToRgba(eqStyle.colorEnd, 0));
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(1, r), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Smooth-path helper (quadratic curve through midpoints) shared by the
+  // "smooth line" and "aura ring" styles below, for a fluid, non-jagged look
+  // instead of straight bar-to-bar line segments.
+  function midpoint(a, b){ return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+  function traceSmoothPath(ctx, points, closed){
+    if(points.length < 2) return;
+    ctx.beginPath();
+    if(closed){
+      const start = midpoint(points[points.length - 1], points[0]);
+      ctx.moveTo(start.x, start.y);
+      for(let i = 0; i < points.length; i++){
+        const next = points[(i + 1) % points.length];
+        const mid = midpoint(points[i], next);
+        ctx.quadraticCurveTo(points[i].x, points[i].y, mid.x, mid.y);
+      }
+      ctx.closePath();
+    } else {
+      ctx.moveTo(points[0].x, points[0].y);
+      for(let i = 1; i < points.length - 1; i++){
+        const mid = midpoint(points[i], points[i + 1]);
+        ctx.quadraticCurveTo(points[i].x, points[i].y, mid.x, mid.y);
+      }
+      ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+    }
+  }
+
+  // Fluid curved spectrum line with a soft area fill - a chic, minimal look
+  // (closer to a modern music app's "now playing" waveform than a jagged bar
+  // chart), good for stylish pop/city-pop tracks.
+  function drawEqSmoothLine(ctx, w, h){
+    const barCount = Math.max(10, eqStyle.barCount);
+    const values = getBarValues(barCount);
+    const stepX = w / ((barCount - 1) || 1);
+    const points = [];
+    for(let i = 0; i < barCount; i++){
+      points.push({ x: i * stepX, y: h - values[i] * h * 0.8 - h * 0.08 });
+    }
+    traceSmoothPath(ctx, points, false);
+    ctx.lineTo(w, h);
+    ctx.lineTo(0, h);
+    ctx.closePath();
+    const fillGrad = ctx.createLinearGradient(0, 0, 0, h);
+    fillGrad.addColorStop(0, hexToRgba(eqStyle.colorStart, 0.35));
+    fillGrad.addColorStop(1, hexToRgba(eqStyle.colorEnd, 0.02));
+    ctx.fillStyle = fillGrad;
+    ctx.fill();
+    traceSmoothPath(ctx, points, false);
+    const strokeGrad = ctx.createLinearGradient(0, 0, w, 0);
+    strokeGrad.addColorStop(0, eqStyle.colorStart);
+    strokeGrad.addColorStop(1, eqStyle.colorEnd);
+    ctx.strokeStyle = strokeGrad;
+    ctx.lineWidth = Math.max(2, h * 0.012);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  }
+
+  // Soft glowing "aura" blob - a closed smooth curve through radial bar tips,
+  // slowly rotating. Elegant and moody rather than spiky, good for chic /
+  // lounge-y tracks where a sharp starburst would feel too aggressive.
+  function drawEqAuraRing(ctx, w, h){
+    const barCount = Math.max(16, eqStyle.barCount);
+    const values = getBarValues(barCount);
+    const cx = w / 2, cy = h / 2;
+    const baseRadius = Math.min(w, h) * 0.22;
+    const maxLen = Math.min(w, h) * 0.20;
+    const rotation = (performance.now() / 20000) % (Math.PI * 2);
+    const points = [];
+    for(let i = 0; i < barCount; i++){
+      const angle = (i / barCount) * Math.PI * 2 + rotation;
+      const r = baseRadius + values[i] * maxLen;
+      points.push({ x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r });
+    }
+    traceSmoothPath(ctx, points, true);
+    const fillGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, baseRadius + maxLen));
+    fillGrad.addColorStop(0, hexToRgba(eqStyle.colorStart, 0.28));
+    fillGrad.addColorStop(1, hexToRgba(eqStyle.colorEnd, 0.04));
+    ctx.fillStyle = fillGrad;
+    ctx.fill();
+    traceSmoothPath(ctx, points, true);
+    ctx.strokeStyle = eqStyle.colorStart;
+    ctx.lineWidth = Math.max(1.5, Math.min(w, h) * 0.006);
+    ctx.stroke();
+  }
+
   function drawEqOscilloscope(ctx, w, h){
     const data = eqTimeDataArray;
     const len = data.length;
@@ -1502,6 +1882,13 @@
         case 'dots': drawEqDots(ctx, rect.w, rect.h); break;
         case 'led': drawEqLed(ctx, rect.w, rect.h); break;
         case 'radialDots': drawEqRadialDots(ctx, rect.w, rect.h); break;
+        case 'polygon': drawEqPolygon(ctx, rect.w, rect.h); break;
+        case 'rays': drawEqRays(ctx, rect.w, rect.h); break;
+        case 'ripple': drawEqRipple(ctx, rect.w, rect.h); break;
+        case 'particles': drawEqParticles(ctx, rect.w, rect.h); break;
+        case 'orb': drawEqOrb(ctx, rect.w, rect.h); break;
+        case 'smoothline': drawEqSmoothLine(ctx, rect.w, rect.h); break;
+        case 'auraring': drawEqAuraRing(ctx, rect.w, rect.h); break;
         default: drawEqBars(ctx, rect.w, rect.h);
       }
     }
@@ -1583,12 +1970,22 @@
 
   /* ---------- EQ style: mood auto-generation ---------- */
   const MOOD_PRESETS = [
-    { label:'エネルギッシュ', test: function(f){ return f.rms > 0.12 && f.dynamics > 0.5; },
+    { label:'ダンス・中毒的', test: function(f){ return f.rms > 0.13 && f.zcr > 0.085; },
+      style:{ type:'ripple', colorStart:'#ff3d9a', colorEnd:'#7c3dff', barCount:48, smoothing:0.55, glow:0.85 } },
+    { label:'ロック・アンセム', test: function(f){ return f.rms > 0.12 && f.dynamics > 0.5; },
+      style:{ type:'rays', colorStart:'#ff6a3d', colorEnd:'#ffd23d', barCount:40, smoothing:0.5, glow:0.75 } },
+    { label:'エネルギッシュ', test: function(f){ return f.rms > 0.10 && f.dynamics > 0.35; },
       style:{ type:'mirror', colorStart:'#ff6a3d', colorEnd:'#ffd23d', barCount:48, smoothing:0.55, glow:0.7 } },
     { label:'シャープ・煌びやか', test: function(f){ return f.zcr > 0.09; },
-      style:{ type:'dots', colorStart:'#7fe9ff', colorEnd:'#33d6c0', barCount:56, smoothing:0.65, glow:0.6 } },
+      style:{ type:'polygon', colorStart:'#7fe9ff', colorEnd:'#33d6c0', barCount:32, smoothing:0.6, glow:0.6 } },
+    { label:'おしゃれ・都会的', test: function(f){ return f.zcr > 0.055; },
+      style:{ type:'smoothline', colorStart:'#ff9ecf', colorEnd:'#7fe9ff', barCount:36, smoothing:0.7, glow:0.5 } },
+    { label:'アコースティック・優しい', test: function(f){ return f.rms < 0.07 && f.zcr < 0.05; },
+      style:{ type:'orb', colorStart:'#ffcf9e', colorEnd:'#ff9f6a', barCount:24, smoothing:0.85, glow:0.55 } },
+    { label:'エレガント・ムーディー', test: function(f){ return f.dynamics < 0.4 && f.rms >= 0.08; },
+      style:{ type:'auraring', colorStart:'#c9a7ff', colorEnd:'#ff9ecf', barCount:28, smoothing:0.8, glow:0.65 } },
     { label:'アンビエント・幻想的', test: function(f){ return f.rms < 0.05; },
-      style:{ type:'wave', colorStart:'#a78bfa', colorEnd:'#33d6c0', barCount:32, smoothing:0.88, glow:0.9 } },
+      style:{ type:'particles', colorStart:'#a78bfa', colorEnd:'#33d6c0', barCount:24, smoothing:0.85, glow:0.7 } },
     { label:'重厚・落ち着き', test: function(f){ return f.dynamics < 0.35; },
       style:{ type:'circular', colorStart:'#ff9f6a', colorEnd:'#7a3320', barCount:40, smoothing:0.82, glow:0.5 } },
     { label:'バランス型', test: function(){ return true; },
@@ -1661,9 +2058,49 @@
 
   /* ===================== Auto-timing (analyze audio -> set start/end) ===================== */
   // Heuristic vocal/energy segmentation: not real speech-to-text alignment (no
-  // server, no ML model available client-side), but a windowed loudness envelope
-  // with silence-gap detection gets a usable first pass that mainly needs manual
-  // fine-tuning rather than timing every line from scratch.
+  // server, no ML model available client-side). To get a usable first pass we:
+  //  1) band-pass the audio to the vocal presence range (~150Hz-4.5kHz, with a
+  //     boost around 2.2kHz) via OfflineAudioContext so basslines/kick drums and
+  //     cymbals/hi-hats stop being counted as "loud" the way raw full-spectrum
+  //     RMS did (that was the main source of bad detections on real songs).
+  //  2) weight that vocal-band envelope by its ratio against the full-spectrum
+  //     envelope ("salience"), so a loud instrumental passage in the same
+  //     frequency range (guitar solo, synth lead) is suppressed relative to
+  //     sections where vocals actually dominate the mix.
+  //  3) threshold against a locally-adaptive floor (rolling min/max over a few
+  //     seconds) instead of one global percentile, since a quiet verse and a
+  //     loud chorus need very different silence cutoffs in the same track.
+  function renderVocalBandBuffer(buffer){
+    const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if(!OfflineCtx || buffer.length === 0) return Promise.resolve(buffer);
+    return new Promise(function(resolve){
+      try {
+        const offlineCtx = new OfflineCtx(1, buffer.length, buffer.sampleRate);
+        const src = offlineCtx.createBufferSource();
+        src.buffer = buffer;
+        const highpass = offlineCtx.createBiquadFilter();
+        highpass.type = 'highpass';
+        highpass.frequency.value = 150;
+        highpass.Q.value = 0.7;
+        const lowpass = offlineCtx.createBiquadFilter();
+        lowpass.type = 'lowpass';
+        lowpass.frequency.value = 4500;
+        lowpass.Q.value = 0.7;
+        const presence = offlineCtx.createBiquadFilter();
+        presence.type = 'peaking';
+        presence.frequency.value = 2200;
+        presence.Q.value = 1.0;
+        presence.gain.value = 9;
+        src.connect(highpass);
+        highpass.connect(lowpass);
+        lowpass.connect(presence);
+        presence.connect(offlineCtx.destination);
+        src.start(0);
+        offlineCtx.startRendering().then(resolve).catch(function(){ resolve(buffer); });
+      } catch(err){ resolve(buffer); }
+    });
+  }
+
   function computeEnergyEnvelope(buffer, windowSec){
     const sampleRate = buffer.sampleRate;
     const data = buffer.getChannelData(0);
@@ -1690,20 +2127,90 @@
     return out;
   }
 
-  function computeSilenceThreshold(envelope){
+  // Asymmetric envelope follower (near-instant attack, slow release) used as a
+  // "recent peak memory" to score sustain vs. decay shape.
+  function envelopeFollowerSlowRelease(envelope, attackCoeff, releaseCoeff){
+    const n = envelope.length;
+    const out = new Float32Array(n);
+    out[0] = envelope[0];
+    for(let i = 1; i < n; i++){
+      const x = envelope[i];
+      out[i] = (x > out[i - 1])
+        ? attackCoeff * x + (1 - attackCoeff) * out[i - 1]
+        : releaseCoeff * x + (1 - releaseCoeff) * out[i - 1];
+    }
+    return out;
+  }
+
+  // Plucked/strummed acoustic guitar notes attack sharply and then decay away
+  // quickly; sung syllables attack more softly but hold their energy for
+  // longer. Comparing the raw envelope against a slow-release "memory" of its
+  // recent peak captures that: right after a guitar pluck the raw envelope
+  // has already fallen well below what a slowly-decaying follower still
+  // remembers, while sustained singing keeps pace with the follower for much
+  // longer. This weight is used to suppress guitar-pluck-shaped energy that
+  // would otherwise pass the vocal-band + salience filtering above (a guitar
+  // is itself a pitched, harmonic, mid-band instrument, so band-filtering
+  // alone can't tell it apart from a voice).
+  function computeSustainWeight(envelope, windowSec){
+    const releaseTimeSec = 0.45;
+    const releaseCoeff = 1 - Math.exp(-windowSec / releaseTimeSec);
+    const attackCoeff = 0.9;
+    const follower = envelopeFollowerSlowRelease(envelope, attackCoeff, releaseCoeff);
+    const n = envelope.length;
+    const eps = 1e-6;
+    const raw = new Float32Array(n);
+    for(let i = 0; i < n; i++){ raw[i] = envelope[i] / (follower[i] + eps); }
+    const smoothRadius = Math.max(1, Math.round(0.08 / windowSec));
+    return smoothEnvelope(raw, smoothRadius);
+  }
+
+  // Blend vocal-band energy with its ratio against full-band energy so vocal-
+  // dominant windows are emphasized relative to loud instrumental-only ones.
+  function computeVocalSalienceEnvelope(vocalEnvelope, fullEnvelope){
+    const n = vocalEnvelope.length;
+    const out = new Float32Array(n);
+    const eps = 1e-6;
+    let maxFull = eps;
+    for(let i = 0; i < n; i++){ if(fullEnvelope[i] > maxFull) maxFull = fullEnvelope[i]; }
+    const noiseFloor = maxFull * 0.02;
+    for(let i = 0; i < n; i++){
+      const full = Math.max(fullEnvelope[i], noiseFloor);
+      const ratio = vocalEnvelope[i] / (full + eps);
+      const weight = Math.min(1.6, Math.max(0.35, ratio * 1.8));
+      out[i] = vocalEnvelope[i] * weight;
+    }
+    return out;
+  }
+
+  // Locally-adaptive threshold: rolling min/max over a several-second window so
+  // quiet and loud sections of the same track each get their own silence cutoff,
+  // with a global noise floor so true silence never crosses it.
+  function computeAdaptiveThreshold(envelope, windowSec, localWindowSec, ratio){
+    const n = envelope.length;
+    const half = Math.max(1, Math.round((localWindowSec / windowSec) / 2));
     const sorted = Array.prototype.slice.call(envelope).sort(function(a, b){ return a - b; });
-    const p20 = sorted[Math.floor(sorted.length * 0.2)] || 0;
-    const p90 = sorted[Math.floor(sorted.length * 0.9)] || 0;
-    return p20 + (p90 - p20) * 0.15;
+    const globalFloor = (sorted[Math.floor(sorted.length * 0.1)] || 0);
+    const threshold = new Float32Array(n);
+    for(let i = 0; i < n; i++){
+      const lo = Math.max(0, i - half), hi = Math.min(n - 1, i + half);
+      let mn = Infinity, mx = -Infinity;
+      for(let j = lo; j <= hi; j++){ const v = envelope[j]; if(v < mn) mn = v; if(v > mx) mx = v; }
+      threshold[i] = Math.max(mn + (mx - mn) * ratio, globalFloor);
+    }
+    return threshold;
   }
 
   function detectSegments(envelope, windowSec, threshold, minGapSec, minSegSec){
     const minGapWindows = Math.max(1, Math.round(minGapSec / windowSec));
     const minSegWindows = Math.max(1, Math.round(minSegSec / windowSec));
+    const thresholdAt = (typeof threshold === 'number')
+      ? function(){ return threshold; }
+      : function(i){ return threshold[i]; };
     const raw = [];
     let inSeg = false, segStart = 0;
     for(let i = 0; i < envelope.length; i++){
-      const above = envelope[i] > threshold;
+      const above = envelope[i] > thresholdAt(i);
       if(above && !inSeg){ inSeg = true; segStart = i; }
       else if(!above && inSeg){ inSeg = false; raw.push([segStart, i]); }
     }
@@ -1733,16 +2240,45 @@
     return minIdx * windowSec;
   }
 
+  function segmentPeakStrength(seg, envelope, windowSec){
+    const s = Math.max(0, Math.round(seg.start / windowSec));
+    const e = Math.min(envelope.length, Math.round(seg.end / windowSec));
+    let peak = 0;
+    for(let i = s; i < e; i++){ if(envelope[i] > peak) peak = envelope[i]; }
+    return peak;
+  }
+
   function adjustSegmentCount(segments, targetCount, envelope, windowSec){
     segments = segments.map(function(s){ return { start: s.start, end: s.end }; });
+    // When there are more detected segments than lines, drop the weakest one
+    // (lowest peak in the vocal/sustain-weighted envelope) by folding it into
+    // its nearer neighbor, rather than always merging whichever pair happens
+    // to sit closest together in time. A stray short false-positive (e.g. a
+    // single guitar pluck) is usually much weaker than real vocal segments,
+    // so this lets it get absorbed instead of displacing real line timing.
     while(segments.length > targetCount && segments.length > 1){
-      let minGap = Infinity, minIdx = 0;
-      for(let i = 0; i < segments.length - 1; i++){
-        const gap = segments[i + 1].start - segments[i].end;
-        if(gap < minGap){ minGap = gap; minIdx = i; }
+      let weakestIdx = 0, weakestStrength = Infinity;
+      for(let i = 0; i < segments.length; i++){
+        const strength = segmentPeakStrength(segments[i], envelope, windowSec);
+        if(strength < weakestStrength){ weakestStrength = strength; weakestIdx = i; }
       }
-      segments[minIdx].end = segments[minIdx + 1].end;
-      segments.splice(minIdx + 1, 1);
+      if(weakestIdx === 0){
+        segments[1].start = segments[0].start;
+        segments.splice(0, 1);
+      } else if(weakestIdx === segments.length - 1){
+        segments[weakestIdx - 1].end = segments[weakestIdx].end;
+        segments.splice(weakestIdx, 1);
+      } else {
+        const gapPrev = segments[weakestIdx].start - segments[weakestIdx - 1].end;
+        const gapNext = segments[weakestIdx + 1].start - segments[weakestIdx].end;
+        if(gapPrev <= gapNext){
+          segments[weakestIdx - 1].end = segments[weakestIdx].end;
+          segments.splice(weakestIdx, 1);
+        } else {
+          segments[weakestIdx + 1].start = segments[weakestIdx].start;
+          segments.splice(weakestIdx, 1);
+        }
+      }
     }
     while(segments.length < targetCount){
       let maxLen = -1, maxIdx = 0;
@@ -1773,12 +2309,25 @@
 
     autoTimeBtn.disabled = true;
     setStatus('楽曲を解析中…', '');
+    let decodedBuffer = null;
     currentAudioFile.arrayBuffer()
       .then(function(arrayBuffer){ return audioCtx.decodeAudioData(arrayBuffer); })
       .then(function(buffer){
+        decodedBuffer = buffer;
+        return renderVocalBandBuffer(buffer);
+      })
+      .then(function(vocalBuffer){
         const windowSec = 0.03;
-        const envelope = smoothEnvelope(computeEnergyEnvelope(buffer, windowSec), 3);
-        const threshold = computeSilenceThreshold(envelope);
+        const fullEnvelope = smoothEnvelope(computeEnergyEnvelope(decodedBuffer, windowSec), 3);
+        const vocalEnvelopeRaw = smoothEnvelope(computeEnergyEnvelope(vocalBuffer, windowSec), 3);
+        const salienceEnvelope = computeVocalSalienceEnvelope(vocalEnvelopeRaw, fullEnvelope);
+        const sustainWeight = computeSustainWeight(vocalEnvelopeRaw, windowSec);
+        const envelope = new Float32Array(salienceEnvelope.length);
+        for(let i = 0; i < envelope.length; i++){
+          const w = Math.min(1.3, Math.max(0.3, Math.pow(sustainWeight[i], 1.5)));
+          envelope[i] = salienceEnvelope[i] * w;
+        }
+        const threshold = computeAdaptiveThreshold(envelope, windowSec, 3.5, 0.22);
         let segments = detectSegments(envelope, windowSec, threshold, 0.18, 0.05);
         if(segments.length === 0){
           setStatus('有音区間を検出できませんでした。音源をご確認ください。', 'err');
@@ -2036,14 +2585,26 @@
     return lines;
   }
 
+  function getBgDrawSource(){
+    if(currentBgKind === 'video'){
+      const v = previewBgVideo;
+      if(v.readyState >= 2 && v.videoWidth) return { el: v, w: v.videoWidth, h: v.videoHeight };
+      return null;
+    }
+    const img = previewBgImageEl;
+    if(!img) return null;
+    const isBitmap = typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap;
+    const ready = isBitmap || (img.complete && img.naturalWidth);
+    if(!ready) return null;
+    return { el: img, w: isBitmap ? img.width : img.naturalWidth, h: isBitmap ? img.height : img.naturalHeight };
+  }
+
   function drawCanvasBackground(ctx, w, h, scale){
     scale = scale || 1;
     ctx.fillStyle = '#14171c';
     ctx.fillRect(0, 0, w, h);
-    const img = previewBgImageEl;
-    const isBitmap = typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap;
-    const ready = img && (isBitmap || (img.complete && img.naturalWidth));
-    if(!ready){
+    const source = getBgDrawSource();
+    if(!source){
       const grad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.max(w, h) * 0.7);
       grad.addColorStop(0, '#1c2129');
       grad.addColorStop(1, '#14171c');
@@ -2051,36 +2612,22 @@
       ctx.fillRect(0, 0, w, h);
       return;
     }
-    const iw = isBitmap ? img.width : img.naturalWidth;
-    const ih = isBitmap ? img.height : img.naturalHeight;
-    const mode = bgSizeModeSelect.value;
-    let drawW, drawH;
-    if(mode === 'cover'){
-      const bgScale = Math.max(w / iw, h / ih);
-      drawW = iw * bgScale; drawH = ih * bgScale;
-    } else if(mode === 'auto'){
-      // "auto" renders the image at its native pixel size relative to the on-screen
-      // preview (CSS background-size:auto is 1 image px = 1 CSS px there); scale by
-      // the export/on-screen resolution ratio so it occupies the same proportion of
-      // the frame in the exported video instead of shrinking at higher export resolutions.
-      drawW = iw * scale; drawH = ih * scale;
-    } else if(mode === 'zoom'){
-      const zoomRaw = parseFloat(bgZoomInput.value);
-      const zoom = (isNaN(zoomRaw) ? 100 : zoomRaw) / 100;
-      drawW = w * zoom; drawH = drawW * (ih / iw);
-    } else {
-      const bgScale = Math.min(w / iw, h / ih);
-      drawW = iw * bgScale; drawH = ih * bgScale;
-    }
     // Note: use isNaN checks here, not `parseFloat(...) || 50` — 0 is a valid,
     // reachable position (fully left/top) and is falsy, so `0 || 50` would
-    // silently discard it and re-center the crop, unlike the on-screen CSS
-    // path (applyBgTransform) which sets it via plain string concatenation.
+    // silently discard it and re-center the crop, unlike the on-screen CSS/
+    // video-layout path (applyBgVideoLayout / computeBgDrawRect) which shares
+    // this exact same computeBgDrawRect() call.
+    const zoomRaw = parseFloat(bgZoomInput.value);
     const posXRaw = parseFloat(bgPosXInput.value);
     const posYRaw = parseFloat(bgPosYInput.value);
-    const posX = (isNaN(posXRaw) ? 50 : posXRaw) / 100;
-    const posY = (isNaN(posYRaw) ? 50 : posYRaw) / 100;
-    ctx.drawImage(img, (w - drawW) * posX, (h - drawH) * posY, drawW, drawH);
+    const rect = computeBgDrawRect(
+      w, h, source.w, source.h, bgSizeModeSelect.value,
+      isNaN(zoomRaw) ? 100 : zoomRaw,
+      isNaN(posXRaw) ? 50 : posXRaw,
+      isNaN(posYRaw) ? 50 : posYRaw,
+      scale
+    );
+    ctx.drawImage(source.el, rect.x, rect.y, rect.w, rect.h);
     if(previewBg.classList.contains('has-image')){
       ctx.fillStyle = 'rgba(8,10,13,.48)';
       ctx.fillRect(0, 0, w, h);
@@ -2242,6 +2789,13 @@
           case 'dots': drawEqDots(recordCtx, rect.w, rect.h); break;
           case 'led': drawEqLed(recordCtx, rect.w, rect.h); break;
           case 'radialDots': drawEqRadialDots(recordCtx, rect.w, rect.h); break;
+          case 'polygon': drawEqPolygon(recordCtx, rect.w, rect.h); break;
+          case 'rays': drawEqRays(recordCtx, rect.w, rect.h); break;
+          case 'ripple': drawEqRipple(recordCtx, rect.w, rect.h); break;
+          case 'particles': drawEqParticles(recordCtx, rect.w, rect.h); break;
+          case 'orb': drawEqOrb(recordCtx, rect.w, rect.h); break;
+          case 'smoothline': drawEqSmoothLine(recordCtx, rect.w, rect.h); break;
+          case 'auraring': drawEqAuraRing(recordCtx, rect.w, rect.h); break;
           default: drawEqBars(recordCtx, rect.w, rect.h);
         }
       }
@@ -3126,6 +3680,7 @@
           audioFile: currentAudioFile || null,
           audioFileName: audioFileName.textContent,
           bgImageFile: currentBgFile || null,
+          bgKind: currentBgKind || null,
           lyricsFileName: lyricsFileName.textContent,
           lyricsLines: lyricsLines,
           uid: uid,
@@ -3182,11 +3737,21 @@
       if(record.bgImageFile){
         if(previewBgUrl) URL.revokeObjectURL(previewBgUrl);
         currentBgFile = record.bgImageFile;
+        currentBgKind = record.bgKind || 'image'; // older saved sessions predate video support
         previewBgUrl = URL.createObjectURL(record.bgImageFile);
-        previewBg.style.backgroundImage = 'url(' + previewBgUrl + ')';
+        if(currentBgKind === 'video'){
+          previewBg.style.backgroundImage = '';
+          previewBgImageEl = null;
+          previewBgVideo.style.display = 'block';
+          previewBgVideo.src = previewBgUrl;
+          previewBgVideo.load();
+          previewBgVideo.play().catch(function(){});
+        } else {
+          previewBg.style.backgroundImage = 'url(' + previewBgUrl + ')';
+          loadPreviewBgImage(record.bgImageFile);
+        }
         previewBg.classList.add('has-image');
         previewBgClearBtn.disabled = false;
-        loadPreviewBgImage(record.bgImageFile);
         restoredSomething = true;
       }
 
