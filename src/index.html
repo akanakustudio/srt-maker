@@ -1989,6 +1989,21 @@
 
     resizeEqCanvas();
     const targetRes = getExportResolution();
+    console.log('[srt-maker] 動画出力デバッグ情報', {
+      bgSizeMode: bgSizeModeSelect.value,
+      bgZoom: bgZoomInput.value,
+      bgPosX: bgPosXInput.value,
+      bgPosY: bgPosYInput.value,
+      previewStageClassName: previewStage.className,
+      previewStageRect: previewStage.getBoundingClientRect(),
+      previewEqCanvasSize: { w: previewEqCanvas.width, h: previewEqCanvas.height },
+      exportTargetResolution: targetRes,
+      previewBgImageEl: previewBgImageEl ? {
+        kind: previewBgImageEl instanceof ImageBitmap ? 'ImageBitmap' : 'HTMLImageElement',
+        width: previewBgImageEl instanceof ImageBitmap ? previewBgImageEl.width : previewBgImageEl.naturalWidth,
+        height: previewBgImageEl instanceof ImageBitmap ? previewBgImageEl.height : previewBgImageEl.naturalHeight
+      } : null
+    });
     if(!recordCanvas){
       recordCanvas = document.createElement('canvas');
       recordCtx = recordCanvas.getContext('2d');
