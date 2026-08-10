@@ -230,9 +230,8 @@
     --preview-shadow-blur: 22px;
     --preview-bg-size: contain;
     --preview-bg-position: 50% 50%;
-    --preview-text-justify: center;
-    --preview-text-align-items: center;
-    --preview-text-halign: center;
+    --preview-text-x: 50%;
+    --preview-text-y: 50%;
   }
   .preview-panel .panel-head{padding:14px 16px 0;margin-bottom:0;}
   .preview-toggle-group{display:flex;gap:14px;flex-wrap:wrap;}
@@ -337,27 +336,27 @@
 
   .preview-single{
     position:relative;z-index:2;height:100%;
-    display:flex;
-    align-items:var(--preview-text-align-items, center);
-    justify-content:var(--preview-text-justify, center);
-    padding:28px 20px;background:transparent;
+    padding:0;background:transparent;
   }
   .preview-single-text{
+    position:absolute;
+    left:var(--preview-text-x, 50%);top:var(--preview-text-y, 50%);
+    max-width:calc(100% - 40px);
     font-family:var(--preview-font-family);
     font-size:var(--preview-single-size);font-weight:var(--preview-font-weight);
     font-style:var(--preview-font-style);
-    text-align:var(--preview-text-halign, center);color:var(--text);
+    text-align:center;color:var(--text);
     line-height:var(--preview-line-height);letter-spacing:var(--preview-letter-spacing);
     text-shadow:0 0 var(--preview-shadow-blur) var(--preview-shadow-color);
     -webkit-text-stroke:var(--preview-stroke-width) var(--preview-stroke-color);
     word-break:break-word;
     transition:opacity var(--preview-transition-duration, .22s) ease, transform var(--preview-transition-duration, .22s) ease;
-    opacity:1;transform:none;
+    opacity:1;transform:translate(-50%,-50%);
   }
   .preview-single-text.transition-out{opacity:0;}
-  .preview-single-text.transition-out[data-effect="slide-up"]{transform:translateY(-16px);}
-  .preview-single-text.transition-out[data-effect="slide-down"]{transform:translateY(16px);}
-  .preview-single-text.transition-out[data-effect="zoom"]{transform:scale(.82);}
+  .preview-single-text.transition-out[data-effect="slide-up"]{transform:translate(-50%,-50%) translateY(-16px);}
+  .preview-single-text.transition-out[data-effect="slide-down"]{transform:translate(-50%,-50%) translateY(16px);}
+  .preview-single-text.transition-out[data-effect="zoom"]{transform:translate(-50%,-50%) scale(.82);}
   .preview-single-text.is-empty{
     color:var(--muted2);font-size:15px;font-weight:400;font-style:normal;
     text-shadow:none;-webkit-text-stroke:0 transparent;
@@ -612,20 +611,14 @@
           <input type="range" id="fontShadowStrength" min="0" max="1" step="0.05" value="0.55">
         </label>
         <label class="preview-control">
-          <span>文字横位置</span>
-          <select id="textPosX">
-            <option value="left">左</option>
-            <option value="center" selected>中央</option>
-            <option value="right">右</option>
-          </select>
+          <span>文字横位置(%)</span>
+          <input type="range" id="textPosXRange" min="0" max="100" step="1" value="50">
+          <input type="number" id="textPosXNumber" min="0" max="100" step="1" value="50">
         </label>
         <label class="preview-control">
-          <span>文字縦位置</span>
-          <select id="textPosY">
-            <option value="top">上</option>
-            <option value="center" selected>中央</option>
-            <option value="bottom">下</option>
-          </select>
+          <span>文字縦位置(%)</span>
+          <input type="range" id="textPosYRange" min="0" max="100" step="1" value="50">
+          <input type="number" id="textPosYNumber" min="0" max="100" step="1" value="50">
         </label>
         <label class="preview-control">
           <span>切替エフェクト</span>
@@ -866,8 +859,10 @@
   const fontStrokeColorInput = document.getElementById('fontStrokeColor');
   const fontShadowColorInput = document.getElementById('fontShadowColor');
   const fontShadowStrengthInput = document.getElementById('fontShadowStrength');
-  const textPosXSelect = document.getElementById('textPosX');
-  const textPosYSelect = document.getElementById('textPosY');
+  const textPosXRange = document.getElementById('textPosXRange');
+  const textPosXNumber = document.getElementById('textPosXNumber');
+  const textPosYRange = document.getElementById('textPosYRange');
+  const textPosYNumber = document.getElementById('textPosYNumber');
   const lineTransitionSelect = document.getElementById('lineTransitionEffect');
   const transitionInDurationInput = document.getElementById('transitionInDuration');
   const transitionOutDurationInput = document.getElementById('transitionOutDuration');
@@ -1081,11 +1076,8 @@
     previewPanel.style.setProperty('--preview-shadow-color', hexToRgba(fontShadowColorInput.value, fontShadowStrengthInput.value));
     previewPanel.style.setProperty('--preview-shadow-blur', (fontShadowStrengthInput.value * 40) + 'px');
 
-    const justifyMap = { left: 'flex-start', center: 'center', right: 'flex-end' };
-    const alignMap = { top: 'flex-start', center: 'center', bottom: 'flex-end' };
-    previewPanel.style.setProperty('--preview-text-justify', justifyMap[textPosXSelect.value] || 'center');
-    previewPanel.style.setProperty('--preview-text-align-items', alignMap[textPosYSelect.value] || 'center');
-    previewPanel.style.setProperty('--preview-text-halign', textPosXSelect.value === 'left' ? 'left' : textPosXSelect.value === 'right' ? 'right' : 'center');
+    previewPanel.style.setProperty('--preview-text-x', (parseFloat(textPosXNumber.value) || 50) + '%');
+    previewPanel.style.setProperty('--preview-text-y', (parseFloat(textPosYNumber.value) || 50) + '%');
   }
 
   previewFontFamilySelect.addEventListener('change', function(){
@@ -1111,9 +1103,19 @@
   [fontLetterSpacingInput, fontLineHeightInput, fontStrokeWidthInput, fontStrokeColorInput, fontShadowColorInput, fontShadowStrengthInput].forEach(function(el){
     el.addEventListener('input', applyPreviewStyle);
   });
-  [textPosXSelect, textPosYSelect].forEach(function(el){
-    el.addEventListener('change', applyPreviewStyle);
-  });
+  function linkRangeAndNumber(rangeEl, numberEl){
+    rangeEl.addEventListener('input', function(){
+      numberEl.value = rangeEl.value;
+      applyPreviewStyle();
+    });
+    numberEl.addEventListener('input', function(){
+      const v = clamp(parseFloat(numberEl.value) || 0, 0, 100);
+      rangeEl.value = v;
+      applyPreviewStyle();
+    });
+  }
+  linkRangeAndNumber(textPosXRange, textPosXNumber);
+  linkRangeAndNumber(textPosYRange, textPosYNumber);
   applyPreviewStyle();
 
   [highlightModeLineBtn, highlightModeTextBtn].forEach(function(btn){
@@ -1704,8 +1706,8 @@
         strokeColor: fontStrokeColorInput.value,
         shadowColor: fontShadowColorInput.value,
         shadowStrength: fontShadowStrengthInput.value,
-        textPosX: textPosXSelect.value,
-        textPosY: textPosYSelect.value,
+        textPosX: textPosXNumber.value,
+        textPosY: textPosYNumber.value,
         transitionEffect: lineTransitionSelect.value,
         transitionInDuration: transitionInDurationInput.value,
         transitionOutDuration: transitionOutDurationInput.value
@@ -1757,8 +1759,14 @@
     if(/^#[0-9a-fA-F]{6}$/.test(font.strokeColor)) fontStrokeColorInput.value = font.strokeColor;
     if(/^#[0-9a-fA-F]{6}$/.test(font.shadowColor)) fontShadowColorInput.value = font.shadowColor;
     if(typeof font.shadowStrength !== 'undefined') fontShadowStrengthInput.value = clampInputValue(fontShadowStrengthInput, font.shadowStrength, fontShadowStrengthInput.value);
-    if(['left','center','right'].indexOf(font.textPosX) !== -1) textPosXSelect.value = font.textPosX;
-    if(['top','center','bottom'].indexOf(font.textPosY) !== -1) textPosYSelect.value = font.textPosY;
+    if(typeof font.textPosX !== 'undefined'){
+      textPosXNumber.value = clampInputValue(textPosXNumber, font.textPosX, textPosXNumber.value);
+      textPosXRange.value = textPosXNumber.value;
+    }
+    if(typeof font.textPosY !== 'undefined'){
+      textPosYNumber.value = clampInputValue(textPosYNumber, font.textPosY, textPosYNumber.value);
+      textPosYRange.value = textPosYNumber.value;
+    }
     if(['none','fade','slide-up','slide-down','zoom'].indexOf(font.transitionEffect) !== -1) lineTransitionSelect.value = font.transitionEffect;
     if(typeof font.transitionInDuration !== 'undefined') transitionInDurationInput.value = clampInputValue(transitionInDurationInput, font.transitionInDuration, transitionInDurationInput.value);
     if(typeof font.transitionOutDuration !== 'undefined') transitionOutDurationInput.value = clampInputValue(transitionOutDurationInput, font.transitionOutDuration, transitionOutDurationInput.value);
@@ -1951,31 +1959,29 @@
     const line = activeIdx !== -1 ? lyricsLines[activeIdx] : null;
     const text = line ? stripMetaTags(line.text) : '';
     const padding = 20 * scale;
-    const hAlign = textPosXSelect.value, vAlign = textPosYSelect.value;
-    const anchorX = hAlign === 'left' ? padding : hAlign === 'right' ? (w - padding) : w / 2;
-    const canvasAlign = hAlign === 'left' ? 'left' : hAlign === 'right' ? 'right' : 'center';
+    // Continuous X/Y position (%), matching the on-screen CSS
+    // left/top:var(--preview-text-x/-y) + translate(-50%,-50%) anchor-at-center approach.
+    const anchorX = w * (clamp(parseFloat(textPosXNumber.value) || 50, 0, 100) / 100);
+    const anchorY = h * (clamp(parseFloat(textPosYNumber.value) || 50, 0, 100) / 100);
+    const maxWidth = Math.max(40, Math.min(anchorX, w - anchorX) * 2 - padding * 2);
 
     ctx.save();
     ctx.globalAlpha = getSingleLineFadeAlpha(activeIdx);
-    ctx.textAlign = canvasAlign;
+    ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     if(!text){
       ctx.font = '400 ' + (15 * scale) + 'px ' + cfg.familyVar;
       ctx.fillStyle = theme.muted2;
-      const emptyY = vAlign === 'top' ? padding + (15 * scale) / 2 : vAlign === 'bottom' ? h - padding - (15 * scale) / 2 : h / 2;
-      ctx.fillText('♪', anchorX, emptyY);
+      ctx.fillText('♪', anchorX, anchorY);
       ctx.restore();
       return;
     }
     ctx.font = (cfg.italic ? 'italic ' : '') + cfg.weight + ' ' + sizePx + 'px ' + cfg.familyVar;
     if('letterSpacing' in ctx) ctx.letterSpacing = (cfg.letterSpacingEm * sizePx) + 'px';
     const lineHeight = sizePx * cfg.lineHeightRatio;
-    const lines = wrapTextLines(ctx, text, w - padding * 2);
+    const lines = wrapTextLines(ctx, text, maxWidth);
     const totalH = lines.length * lineHeight;
-    let y;
-    if(vAlign === 'top') y = padding + lineHeight / 2;
-    else if(vAlign === 'bottom') y = h - padding - totalH + lineHeight / 2;
-    else y = h / 2 - totalH / 2 + lineHeight / 2;
+    let y = anchorY - totalH / 2 + lineHeight / 2;
     ctx.shadowColor = cfg.shadowColor;
     ctx.shadowBlur = cfg.shadowBlur * scale;
     lines.forEach(function(ln){
