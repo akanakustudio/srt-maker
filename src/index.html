@@ -1661,9 +1661,49 @@
 
   /* ===================== Auto-timing (analyze audio -> set start/end) ===================== */
   // Heuristic vocal/energy segmentation: not real speech-to-text alignment (no
-  // server, no ML model available client-side), but a windowed loudness envelope
-  // with silence-gap detection gets a usable first pass that mainly needs manual
-  // fine-tuning rather than timing every line from scratch.
+  // server, no ML model available client-side). To get a usable first pass we:
+  //  1) band-pass the audio to the vocal presence range (~150Hz-4.5kHz, with a
+  //     boost around 2.2kHz) via OfflineAudioContext so basslines/kick drums and
+  //     cymbals/hi-hats stop being counted as "loud" the way raw full-spectrum
+  //     RMS did (that was the main source of bad detections on real songs).
+  //  2) weight that vocal-band envelope by its ratio against the full-spectrum
+  //     envelope ("salience"), so a loud instrumental passage in the same
+  //     frequency range (guitar solo, synth lead) is suppressed relative to
+  //     sections where vocals actually dominate the mix.
+  //  3) threshold against a locally-adaptive floor (rolling min/max over a few
+  //     seconds) instead of one global percentile, since a quiet verse and a
+  //     loud chorus need very different silence cutoffs in the same track.
+  function renderVocalBandBuffer(buffer){
+    const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if(!OfflineCtx || buffer.length === 0) return Promise.resolve(buffer);
+    return new Promise(function(resolve){
+      try {
+        const offlineCtx = new OfflineCtx(1, buffer.length, buffer.sampleRate);
+        const src = offlineCtx.createBufferSource();
+        src.buffer = buffer;
+        const highpass = offlineCtx.createBiquadFilter();
+        highpass.type = 'highpass';
+        highpass.frequency.value = 150;
+        highpass.Q.value = 0.7;
+        const lowpass = offlineCtx.createBiquadFilter();
+        lowpass.type = 'lowpass';
+        lowpass.frequency.value = 4500;
+        lowpass.Q.value = 0.7;
+        const presence = offlineCtx.createBiquadFilter();
+        presence.type = 'peaking';
+        presence.frequency.value = 2200;
+        presence.Q.value = 1.0;
+        presence.gain.value = 9;
+        src.connect(highpass);
+        highpass.connect(lowpass);
+        lowpass.connect(presence);
+        presence.connect(offlineCtx.destination);
+        src.start(0);
+        offlineCtx.startRendering().then(resolve).catch(function(){ resolve(buffer); });
+      } catch(err){ resolve(buffer); }
+    });
+  }
+
   function computeEnergyEnvelope(buffer, windowSec){
     const sampleRate = buffer.sampleRate;
     const data = buffer.getChannelData(0);
@@ -1690,20 +1730,52 @@
     return out;
   }
 
-  function computeSilenceThreshold(envelope){
+  // Blend vocal-band energy with its ratio against full-band energy so vocal-
+  // dominant windows are emphasized relative to loud instrumental-only ones.
+  function computeVocalSalienceEnvelope(vocalEnvelope, fullEnvelope){
+    const n = vocalEnvelope.length;
+    const out = new Float32Array(n);
+    const eps = 1e-6;
+    let maxFull = eps;
+    for(let i = 0; i < n; i++){ if(fullEnvelope[i] > maxFull) maxFull = fullEnvelope[i]; }
+    const noiseFloor = maxFull * 0.02;
+    for(let i = 0; i < n; i++){
+      const full = Math.max(fullEnvelope[i], noiseFloor);
+      const ratio = vocalEnvelope[i] / (full + eps);
+      const weight = Math.min(1.6, Math.max(0.35, ratio * 1.8));
+      out[i] = vocalEnvelope[i] * weight;
+    }
+    return out;
+  }
+
+  // Locally-adaptive threshold: rolling min/max over a several-second window so
+  // quiet and loud sections of the same track each get their own silence cutoff,
+  // with a global noise floor so true silence never crosses it.
+  function computeAdaptiveThreshold(envelope, windowSec, localWindowSec, ratio){
+    const n = envelope.length;
+    const half = Math.max(1, Math.round((localWindowSec / windowSec) / 2));
     const sorted = Array.prototype.slice.call(envelope).sort(function(a, b){ return a - b; });
-    const p20 = sorted[Math.floor(sorted.length * 0.2)] || 0;
-    const p90 = sorted[Math.floor(sorted.length * 0.9)] || 0;
-    return p20 + (p90 - p20) * 0.15;
+    const globalFloor = (sorted[Math.floor(sorted.length * 0.1)] || 0);
+    const threshold = new Float32Array(n);
+    for(let i = 0; i < n; i++){
+      const lo = Math.max(0, i - half), hi = Math.min(n - 1, i + half);
+      let mn = Infinity, mx = -Infinity;
+      for(let j = lo; j <= hi; j++){ const v = envelope[j]; if(v < mn) mn = v; if(v > mx) mx = v; }
+      threshold[i] = Math.max(mn + (mx - mn) * ratio, globalFloor);
+    }
+    return threshold;
   }
 
   function detectSegments(envelope, windowSec, threshold, minGapSec, minSegSec){
     const minGapWindows = Math.max(1, Math.round(minGapSec / windowSec));
     const minSegWindows = Math.max(1, Math.round(minSegSec / windowSec));
+    const thresholdAt = (typeof threshold === 'number')
+      ? function(){ return threshold; }
+      : function(i){ return threshold[i]; };
     const raw = [];
     let inSeg = false, segStart = 0;
     for(let i = 0; i < envelope.length; i++){
-      const above = envelope[i] > threshold;
+      const above = envelope[i] > thresholdAt(i);
       if(above && !inSeg){ inSeg = true; segStart = i; }
       else if(!above && inSeg){ inSeg = false; raw.push([segStart, i]); }
     }
@@ -1773,12 +1845,19 @@
 
     autoTimeBtn.disabled = true;
     setStatus('楽曲を解析中…', '');
+    let decodedBuffer = null;
     currentAudioFile.arrayBuffer()
       .then(function(arrayBuffer){ return audioCtx.decodeAudioData(arrayBuffer); })
       .then(function(buffer){
+        decodedBuffer = buffer;
+        return renderVocalBandBuffer(buffer);
+      })
+      .then(function(vocalBuffer){
         const windowSec = 0.03;
-        const envelope = smoothEnvelope(computeEnergyEnvelope(buffer, windowSec), 3);
-        const threshold = computeSilenceThreshold(envelope);
+        const fullEnvelope = smoothEnvelope(computeEnergyEnvelope(decodedBuffer, windowSec), 3);
+        const vocalEnvelopeRaw = smoothEnvelope(computeEnergyEnvelope(vocalBuffer, windowSec), 3);
+        const envelope = computeVocalSalienceEnvelope(vocalEnvelopeRaw, fullEnvelope);
+        const threshold = computeAdaptiveThreshold(envelope, windowSec, 3.5, 0.22);
         let segments = detectSegments(envelope, windowSec, threshold, 0.18, 0.05);
         if(segments.length === 0){
           setStatus('有音区間を検出できませんでした。音源をご確認ください。', 'err');
