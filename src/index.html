@@ -1730,6 +1730,44 @@
     return out;
   }
 
+  // Asymmetric envelope follower (near-instant attack, slow release) used as a
+  // "recent peak memory" to score sustain vs. decay shape.
+  function envelopeFollowerSlowRelease(envelope, attackCoeff, releaseCoeff){
+    const n = envelope.length;
+    const out = new Float32Array(n);
+    out[0] = envelope[0];
+    for(let i = 1; i < n; i++){
+      const x = envelope[i];
+      out[i] = (x > out[i - 1])
+        ? attackCoeff * x + (1 - attackCoeff) * out[i - 1]
+        : releaseCoeff * x + (1 - releaseCoeff) * out[i - 1];
+    }
+    return out;
+  }
+
+  // Plucked/strummed acoustic guitar notes attack sharply and then decay away
+  // quickly; sung syllables attack more softly but hold their energy for
+  // longer. Comparing the raw envelope against a slow-release "memory" of its
+  // recent peak captures that: right after a guitar pluck the raw envelope
+  // has already fallen well below what a slowly-decaying follower still
+  // remembers, while sustained singing keeps pace with the follower for much
+  // longer. This weight is used to suppress guitar-pluck-shaped energy that
+  // would otherwise pass the vocal-band + salience filtering above (a guitar
+  // is itself a pitched, harmonic, mid-band instrument, so band-filtering
+  // alone can't tell it apart from a voice).
+  function computeSustainWeight(envelope, windowSec){
+    const releaseTimeSec = 0.45;
+    const releaseCoeff = 1 - Math.exp(-windowSec / releaseTimeSec);
+    const attackCoeff = 0.9;
+    const follower = envelopeFollowerSlowRelease(envelope, attackCoeff, releaseCoeff);
+    const n = envelope.length;
+    const eps = 1e-6;
+    const raw = new Float32Array(n);
+    for(let i = 0; i < n; i++){ raw[i] = envelope[i] / (follower[i] + eps); }
+    const smoothRadius = Math.max(1, Math.round(0.08 / windowSec));
+    return smoothEnvelope(raw, smoothRadius);
+  }
+
   // Blend vocal-band energy with its ratio against full-band energy so vocal-
   // dominant windows are emphasized relative to loud instrumental-only ones.
   function computeVocalSalienceEnvelope(vocalEnvelope, fullEnvelope){
@@ -1805,16 +1843,45 @@
     return minIdx * windowSec;
   }
 
+  function segmentPeakStrength(seg, envelope, windowSec){
+    const s = Math.max(0, Math.round(seg.start / windowSec));
+    const e = Math.min(envelope.length, Math.round(seg.end / windowSec));
+    let peak = 0;
+    for(let i = s; i < e; i++){ if(envelope[i] > peak) peak = envelope[i]; }
+    return peak;
+  }
+
   function adjustSegmentCount(segments, targetCount, envelope, windowSec){
     segments = segments.map(function(s){ return { start: s.start, end: s.end }; });
+    // When there are more detected segments than lines, drop the weakest one
+    // (lowest peak in the vocal/sustain-weighted envelope) by folding it into
+    // its nearer neighbor, rather than always merging whichever pair happens
+    // to sit closest together in time. A stray short false-positive (e.g. a
+    // single guitar pluck) is usually much weaker than real vocal segments,
+    // so this lets it get absorbed instead of displacing real line timing.
     while(segments.length > targetCount && segments.length > 1){
-      let minGap = Infinity, minIdx = 0;
-      for(let i = 0; i < segments.length - 1; i++){
-        const gap = segments[i + 1].start - segments[i].end;
-        if(gap < minGap){ minGap = gap; minIdx = i; }
+      let weakestIdx = 0, weakestStrength = Infinity;
+      for(let i = 0; i < segments.length; i++){
+        const strength = segmentPeakStrength(segments[i], envelope, windowSec);
+        if(strength < weakestStrength){ weakestStrength = strength; weakestIdx = i; }
       }
-      segments[minIdx].end = segments[minIdx + 1].end;
-      segments.splice(minIdx + 1, 1);
+      if(weakestIdx === 0){
+        segments[1].start = segments[0].start;
+        segments.splice(0, 1);
+      } else if(weakestIdx === segments.length - 1){
+        segments[weakestIdx - 1].end = segments[weakestIdx].end;
+        segments.splice(weakestIdx, 1);
+      } else {
+        const gapPrev = segments[weakestIdx].start - segments[weakestIdx - 1].end;
+        const gapNext = segments[weakestIdx + 1].start - segments[weakestIdx].end;
+        if(gapPrev <= gapNext){
+          segments[weakestIdx - 1].end = segments[weakestIdx].end;
+          segments.splice(weakestIdx, 1);
+        } else {
+          segments[weakestIdx + 1].start = segments[weakestIdx].start;
+          segments.splice(weakestIdx, 1);
+        }
+      }
     }
     while(segments.length < targetCount){
       let maxLen = -1, maxIdx = 0;
@@ -1856,7 +1923,13 @@
         const windowSec = 0.03;
         const fullEnvelope = smoothEnvelope(computeEnergyEnvelope(decodedBuffer, windowSec), 3);
         const vocalEnvelopeRaw = smoothEnvelope(computeEnergyEnvelope(vocalBuffer, windowSec), 3);
-        const envelope = computeVocalSalienceEnvelope(vocalEnvelopeRaw, fullEnvelope);
+        const salienceEnvelope = computeVocalSalienceEnvelope(vocalEnvelopeRaw, fullEnvelope);
+        const sustainWeight = computeSustainWeight(vocalEnvelopeRaw, windowSec);
+        const envelope = new Float32Array(salienceEnvelope.length);
+        for(let i = 0; i < envelope.length; i++){
+          const w = Math.min(1.3, Math.max(0.3, Math.pow(sustainWeight[i], 1.5)));
+          envelope[i] = salienceEnvelope[i] * w;
+        }
         const threshold = computeAdaptiveThreshold(envelope, windowSec, 3.5, 0.22);
         let segments = detectSegments(envelope, windowSec, threshold, 0.18, 0.05);
         if(segments.length === 0){
