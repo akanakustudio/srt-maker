@@ -516,6 +516,7 @@
         <label class="preview-control">
           <span>文字サイズ</span>
           <select id="previewFontSize">
+            <option value="xs">極小</option>
             <option value="s">小</option>
             <option value="m" selected>中</option>
             <option value="l">大</option>
@@ -930,6 +931,7 @@
     { name:'Pacifico', category:'欧文', fallback:'cursive' }
   ];
   const PREVIEW_SIZES = {
+    xs: { single: '14px', all: '9px' },
     s: { single: '22px', all: '12px' },
     m: { single: 'clamp(20px,4vw,34px)', all: '14px' },
     l: { single: '40px', all: '17px' },
