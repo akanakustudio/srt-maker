@@ -741,6 +741,7 @@
       </div>
 
       <div class="table-toolbar">
+        <button class="ghost-btn small" id="autoTimeBtn">曲を解析してタイミングを自動セット</button>
         <button class="ghost-btn small" id="bulkSyncBtn" disabled>選択行: 終了時間を次行の開始時間にセット</button>
         <span class="hint" id="selectedCountHint"></span>
       </div>
@@ -832,6 +833,7 @@
   const saveBtn = document.getElementById('saveBtn');
   const statusEl = document.getElementById('status');
   const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+  const autoTimeBtn = document.getElementById('autoTimeBtn');
   const bulkSyncBtn = document.getElementById('bulkSyncBtn');
   const selectedCountHint = document.getElementById('selectedCountHint');
   let selectedIds = new Set();
@@ -1654,6 +1656,153 @@
       })
       .finally(function(){
         eqAutoStyleBtn.disabled = false;
+      });
+  });
+
+  /* ===================== Auto-timing (analyze audio -> set start/end) ===================== */
+  // Heuristic vocal/energy segmentation: not real speech-to-text alignment (no
+  // server, no ML model available client-side), but a windowed loudness envelope
+  // with silence-gap detection gets a usable first pass that mainly needs manual
+  // fine-tuning rather than timing every line from scratch.
+  function computeEnergyEnvelope(buffer, windowSec){
+    const sampleRate = buffer.sampleRate;
+    const data = buffer.getChannelData(0);
+    const windowSize = Math.max(1, Math.round(sampleRate * windowSec));
+    const numWindows = Math.max(1, Math.ceil(data.length / windowSize));
+    const envelope = new Float32Array(numWindows);
+    for(let w = 0; w < numWindows; w++){
+      const start = w * windowSize;
+      const end = Math.min(data.length, start + windowSize);
+      let sum = 0;
+      for(let i = start; i < end; i++){ sum += data[i] * data[i]; }
+      envelope[w] = Math.sqrt(sum / Math.max(1, end - start));
+    }
+    return envelope;
+  }
+
+  function smoothEnvelope(envelope, radius){
+    const out = new Float32Array(envelope.length);
+    for(let i = 0; i < envelope.length; i++){
+      let sum = 0, cnt = 0;
+      for(let j = Math.max(0, i - radius); j <= Math.min(envelope.length - 1, i + radius); j++){ sum += envelope[j]; cnt++; }
+      out[i] = sum / cnt;
+    }
+    return out;
+  }
+
+  function computeSilenceThreshold(envelope){
+    const sorted = Array.prototype.slice.call(envelope).sort(function(a, b){ return a - b; });
+    const p20 = sorted[Math.floor(sorted.length * 0.2)] || 0;
+    const p90 = sorted[Math.floor(sorted.length * 0.9)] || 0;
+    return p20 + (p90 - p20) * 0.15;
+  }
+
+  function detectSegments(envelope, windowSec, threshold, minGapSec, minSegSec){
+    const minGapWindows = Math.max(1, Math.round(minGapSec / windowSec));
+    const minSegWindows = Math.max(1, Math.round(minSegSec / windowSec));
+    const raw = [];
+    let inSeg = false, segStart = 0;
+    for(let i = 0; i < envelope.length; i++){
+      const above = envelope[i] > threshold;
+      if(above && !inSeg){ inSeg = true; segStart = i; }
+      else if(!above && inSeg){ inSeg = false; raw.push([segStart, i]); }
+    }
+    if(inSeg) raw.push([segStart, envelope.length]);
+    const merged = [];
+    raw.forEach(function(seg){
+      if(merged.length && (seg[0] - merged[merged.length - 1][1]) < minGapWindows){
+        merged[merged.length - 1][1] = seg[1];
+      } else {
+        merged.push(seg.slice());
+      }
+    });
+    return merged
+      .filter(function(seg){ return (seg[1] - seg[0]) >= minSegWindows; })
+      .map(function(seg){ return { start: seg[0] * windowSec, end: seg[1] * windowSec }; });
+  }
+
+  function findLocalMinimumSplit(seg, envelope, windowSec){
+    const startIdx = Math.round(seg.start / windowSec), endIdx = Math.round(seg.end / windowSec);
+    if(endIdx - startIdx < 3) return (seg.start + seg.end) / 2;
+    const searchStart = startIdx + Math.floor((endIdx - startIdx) * 0.2);
+    const searchEnd = startIdx + Math.ceil((endIdx - startIdx) * 0.8);
+    let minVal = Infinity, minIdx = Math.round((startIdx + endIdx) / 2);
+    for(let i = searchStart; i <= searchEnd; i++){
+      if(envelope[i] < minVal){ minVal = envelope[i]; minIdx = i; }
+    }
+    return minIdx * windowSec;
+  }
+
+  function adjustSegmentCount(segments, targetCount, envelope, windowSec){
+    segments = segments.map(function(s){ return { start: s.start, end: s.end }; });
+    while(segments.length > targetCount && segments.length > 1){
+      let minGap = Infinity, minIdx = 0;
+      for(let i = 0; i < segments.length - 1; i++){
+        const gap = segments[i + 1].start - segments[i].end;
+        if(gap < minGap){ minGap = gap; minIdx = i; }
+      }
+      segments[minIdx].end = segments[minIdx + 1].end;
+      segments.splice(minIdx + 1, 1);
+    }
+    while(segments.length < targetCount){
+      let maxLen = -1, maxIdx = 0;
+      segments.forEach(function(s, i){
+        const len = s.end - s.start;
+        if(len > maxLen){ maxLen = len; maxIdx = i; }
+      });
+      const seg = segments[maxIdx];
+      const splitPoint = findLocalMinimumSplit(seg, envelope, windowSec);
+      segments.splice(maxIdx, 1, { start: seg.start, end: splitPoint }, { start: splitPoint, end: seg.end });
+    }
+    return segments;
+  }
+
+  autoTimeBtn.addEventListener('click', function(){
+    if(!currentAudioFile){ setStatus('先に音源ファイルを開いてください', 'err'); return; }
+    const timeableIndices = [];
+    lyricsLines.forEach(function(line, idx){ if(!line.isMeta && !line.isBlank) timeableIndices.push(idx); });
+    if(timeableIndices.length === 0){ setStatus('タイミングを設定できる歌詞行がありません', 'err'); return; }
+
+    const alreadyTimed = timeableIndices.some(function(idx){ return lyricsLines[idx].start !== null || lyricsLines[idx].end !== null; });
+    if(alreadyTimed && !window.confirm('既に設定されている開始・終了時間を上書きします。よろしいですか？')){
+      return;
+    }
+
+    ensureAudioGraph();
+    if(!audioCtx){ setStatus('この環境ではWeb Audio APIが利用できません', 'err'); return; }
+
+    autoTimeBtn.disabled = true;
+    setStatus('楽曲を解析中…', '');
+    currentAudioFile.arrayBuffer()
+      .then(function(arrayBuffer){ return audioCtx.decodeAudioData(arrayBuffer); })
+      .then(function(buffer){
+        const windowSec = 0.03;
+        const envelope = smoothEnvelope(computeEnergyEnvelope(buffer, windowSec), 3);
+        const threshold = computeSilenceThreshold(envelope);
+        let segments = detectSegments(envelope, windowSec, threshold, 0.18, 0.05);
+        if(segments.length === 0){
+          setStatus('有音区間を検出できませんでした。音源をご確認ください。', 'err');
+          return;
+        }
+        segments = adjustSegmentCount(segments, timeableIndices.length, envelope, windowSec);
+        segments.sort(function(a, b){ return a.start - b.start; });
+
+        timeableIndices.forEach(function(lineIdx, i){
+          const seg = segments[i];
+          if(!seg) return;
+          lyricsLines[lineIdx].start = seg.start;
+          lyricsLines[lineIdx].end = seg.end;
+        });
+        currentIndex = firstTimeableIndex(0);
+        renderTable();
+        scheduleSaveSession();
+        setStatus(timeableIndices.length + '行に自動でタイミングを設定しました。ズレがあれば個別に微調整してください。', 'ok');
+      })
+      .catch(function(err){
+        setStatus('自動タイミング設定に失敗しました: ' + err.message, 'err');
+      })
+      .finally(function(){
+        autoTimeBtn.disabled = false;
       });
   });
 
