@@ -135,7 +135,7 @@
     border-radius:4px;padding:0 6px;font-family:var(--mono);font-size:11px;color:var(--muted);
     margin:0 2px;
   }
-  .help{padding:8px 18px 0;font-size:11.5px;color:var(--muted2);line-height:1.7;text-align:center;}
+  .help{padding:8px 0 0;font-size:11.5px;color:var(--muted2);line-height:1.5;text-align:center;}
 
   /* ---------- Main / lyrics ---------- */
   main{
@@ -492,10 +492,9 @@
       </button>
     </div>
     <div class="current-line-hint" id="currentLineHint">対象行: —</div>
-  </div>
-
-  <div class="help">
-    <span class="kbd">Space</span> を長押しで対象行の開始時間、離すと終了時間をセット（自動的に次の行へ移動）。行番号をクリックすると対象行を手動で切り替えできます。
+    <div class="help">
+      <span class="kbd">Space</span> を長押しで対象行の開始時間、離すと終了時間をセット（自動的に次の行へ移動）。行番号をクリックすると対象行を手動で切り替えできます。
+    </div>
   </div>
 
   <main>
@@ -576,6 +575,17 @@
         <label class="preview-control">
           <span>縦位置</span>
           <input type="range" id="bgPosY" min="0" max="100" step="1" value="50">
+        </label>
+        <label class="preview-control" id="bgVideoLoopEffectRow" title="背景動画がループする瞬間の唐突なカットを緩和します（動画背景の時のみ）">
+          <span>動画ループ時エフェクト</span>
+          <select id="bgLoopEffect">
+            <option value="none" selected>なし</option>
+            <option value="fade">フェード</option>
+          </select>
+        </label>
+        <label class="preview-control" id="bgVideoLoopFadeRow" title="背景動画がループする瞬間の唐突なカットを緩和します（動画背景の時のみ）">
+          <span>ループフェード時間(秒)</span>
+          <input type="range" id="bgLoopFadeDuration" min="0.1" max="2" step="0.1" value="0.5">
         </label>
       </div>
       <div class="font-style-controls" id="fontStyleControls">
@@ -927,6 +937,8 @@
   const bgZoomInput = document.getElementById('bgZoom');
   const bgPosXInput = document.getElementById('bgPosX');
   const bgPosYInput = document.getElementById('bgPosY');
+  const bgLoopEffectSelect = document.getElementById('bgLoopEffect');
+  const bgLoopFadeDurationInput = document.getElementById('bgLoopFadeDuration');
   const previewEqToggle = document.getElementById('previewEqToggle');
   const previewRatioFreeBtn = document.getElementById('previewRatioFree');
   const previewRatioVerticalBtn = document.getElementById('previewRatioVertical');
@@ -1264,12 +1276,58 @@
   if(typeof ResizeObserver !== 'undefined'){
     new ResizeObserver(applyBgVideoLayout).observe(previewStage);
   }
+
+  // Keep the background video's playback position derived from the audio
+  // element's currentTime (looping via modulo its own duration) instead of
+  // just letting it free-run on its native `loop` attribute - that's what
+  // "連動" (linked to the playback controls) means here, and it's also what
+  // fixes "sometimes doesn't play from 0:00": previously the video kept
+  // whatever position it happened to be at (e.g. from an earlier autoplay)
+  // when playback started, instead of being pinned to the audio's position.
+  function syncBgVideoToAudio(forceRestart){
+    if(currentBgKind !== 'video') return;
+    const dur = previewBgVideo.duration;
+    if(!dur || !isFinite(dur) || dur <= 0) return;
+    const target = audioEl.currentTime % dur;
+    if(forceRestart || Math.abs(previewBgVideo.currentTime - target) > 0.25){
+      previewBgVideo.currentTime = target;
+    }
+  }
   audioEl.addEventListener('play', function(){
-    if(currentBgKind === 'video') previewBgVideo.play().catch(function(){});
+    if(currentBgKind !== 'video') return;
+    syncBgVideoToAudio(true);
+    previewBgVideo.play().catch(function(){});
   });
   audioEl.addEventListener('pause', function(){
     if(currentBgKind === 'video') previewBgVideo.pause();
   });
+  audioEl.addEventListener('seeking', function(){ syncBgVideoToAudio(true); });
+  audioEl.addEventListener('seeked', function(){ syncBgVideoToAudio(true); });
+  audioEl.addEventListener('timeupdate', function(){ syncBgVideoToAudio(false); });
+
+  // Loop-point effect: a background video shorter than the song loops many
+  // times, and a hard cut at the loop point is jarring. "fade" briefly dips
+  // opacity near the wrap-around point. Shared with the canvas export path
+  // (drawCanvasBackground) via the same alpha calculation so on-screen
+  // preview and exported video look identical.
+  function getBgVideoLoopAlpha(){
+    if(currentBgKind !== 'video' || bgLoopEffectSelect.value !== 'fade') return 1;
+    const dur = previewBgVideo.duration;
+    if(!dur || !isFinite(dur) || dur <= 0) return 1;
+    const fadeDur = Math.min(dur / 2, Math.max(0.05, parseFloat(bgLoopFadeDurationInput.value) || 0.5));
+    const t = previewBgVideo.currentTime;
+    if(t < fadeDur) return clamp(t / fadeDur, 0, 1);
+    const toEnd = dur - t;
+    if(toEnd < fadeDur) return clamp(toEnd / fadeDur, 0, 1);
+    return 1;
+  }
+  let bgVideoFadeRAF = null;
+  function bgVideoFadeLoop(){
+    bgVideoFadeRAF = requestAnimationFrame(bgVideoFadeLoop);
+    if(currentBgKind !== 'video'){ previewBgVideo.style.opacity = ''; return; }
+    previewBgVideo.style.opacity = getBgVideoLoopAlpha();
+  }
+  bgVideoFadeRAF = requestAnimationFrame(bgVideoFadeLoop);
 
   let previewBgImageEl = null; // an ImageBitmap (preferred) or HTMLImageElement (fallback)
   function loadPreviewBgImage(source){
@@ -1304,6 +1362,20 @@
     previewBgVideo.style.display = 'none';
   }
 
+  // Loads the video and, once its metadata is ready, syncs its position to
+  // the audio's current time and only starts it playing if the audio is
+  // already playing - rather than always autoplaying immediately on select,
+  // which is what left it running out of sync with playback later on.
+  function activateBgVideo(url){
+    previewBgVideo.style.display = 'block';
+    previewBgVideo.src = url;
+    previewBgVideo.load();
+    previewBgVideo.addEventListener('loadedmetadata', function(){
+      syncBgVideoToAudio(true);
+      if(!audioEl.paused) previewBgVideo.play().catch(function(){});
+    }, { once: true });
+  }
+
   function setPreviewBgFile(file){
     if(previewBgUrl) URL.revokeObjectURL(previewBgUrl);
     previewBgUrl = URL.createObjectURL(file);
@@ -1312,10 +1384,7 @@
     if(currentBgKind === 'video'){
       previewBg.style.backgroundImage = '';
       previewBgImageEl = null;
-      previewBgVideo.style.display = 'block';
-      previewBgVideo.src = previewBgUrl;
-      previewBgVideo.load();
-      previewBgVideo.play().catch(function(){});
+      activateBgVideo(previewBgUrl);
     } else {
       clearPreviewBgVideo();
       previewBg.style.backgroundImage = 'url(' + previewBgUrl + ')';
@@ -2480,7 +2549,9 @@
         sizeMode: bgSizeModeSelect.value,
         zoom: bgZoomInput.value,
         posX: bgPosXInput.value,
-        posY: bgPosYInput.value
+        posY: bgPosYInput.value,
+        loopEffect: bgLoopEffectSelect.value,
+        loopFadeDuration: bgLoopFadeDurationInput.value
       },
       highlightMode: previewAll.classList.contains('highlight-text-only') ? 'text' : 'line',
       eq: eqStyle
@@ -2548,6 +2619,8 @@
     if(typeof bg.posX !== 'undefined') bgPosXInput.value = clampInputValue(bgPosXInput, bg.posX, bgPosXInput.value);
     if(typeof bg.posY !== 'undefined') bgPosYInput.value = clampInputValue(bgPosYInput, bg.posY, bgPosYInput.value);
     if(bgModeOptionExists) bgSizeModeSelect.value = bg.sizeMode;
+    if(['none','fade'].indexOf(bg.loopEffect) !== -1) bgLoopEffectSelect.value = bg.loopEffect;
+    if(typeof bg.loopFadeDuration !== 'undefined') bgLoopFadeDurationInput.value = clampInputValue(bgLoopFadeDurationInput, bg.loopFadeDuration, bgLoopFadeDurationInput.value);
     applyBgTransform();
 
     applyPreviewStyle();
@@ -2697,7 +2770,10 @@
       isNaN(posYRaw) ? 50 : posYRaw,
       scale
     );
+    const prevAlpha = ctx.globalAlpha;
+    ctx.globalAlpha = prevAlpha * getBgVideoLoopAlpha();
     ctx.drawImage(source.el, rect.x, rect.y, rect.w, rect.h);
+    ctx.globalAlpha = prevAlpha;
     if(previewBg.classList.contains('has-image')){
       ctx.fillStyle = 'rgba(8,10,13,.48)';
       ctx.fillRect(0, 0, w, h);
@@ -3812,10 +3888,7 @@
         if(currentBgKind === 'video'){
           previewBg.style.backgroundImage = '';
           previewBgImageEl = null;
-          previewBgVideo.style.display = 'block';
-          previewBgVideo.src = previewBgUrl;
-          previewBgVideo.load();
-          previewBgVideo.play().catch(function(){});
+          activateBgVideo(previewBgUrl);
         } else {
           previewBg.style.backgroundImage = 'url(' + previewBgUrl + ')';
           loadPreviewBgImage(record.bgImageFile);
