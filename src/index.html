@@ -849,21 +849,39 @@
           <label class="preview-control">
             <span>EQ種類</span>
             <select id="eqStyleType">
-              <option value="bars">バー</option>
-              <option value="mirror">ミラーバー</option>
-              <option value="wave">波形</option>
-              <option value="circular">サークル</option>
-              <option value="dots">ドット</option>
-              <option value="led">LEDブロック</option>
-              <option value="radialDots">放射ドット</option>
-              <option value="polygon">ポリゴン</option>
-              <option value="rays">スターバースト</option>
-              <option value="ripple">リップル</option>
-              <option value="particles">パーティクル</option>
-              <option value="orb">ブリージングオーブ</option>
-              <option value="smoothline">スムースライン</option>
-              <option value="auraring">オーラリング</option>
-              <option value="oscilloscope">オシロスコープ</option>
+              <optgroup label="定番">
+                <option value="bars">バー</option>
+                <option value="mirror">ミラーバー</option>
+                <option value="wave">波形</option>
+                <option value="led">LEDブロック</option>
+              </optgroup>
+              <optgroup label="ダンス・EDM・中毒系">
+                <option value="ripple">リップル</option>
+                <option value="rays">スターバースト</option>
+                <option value="neongrid">ネオングリッド</option>
+                <option value="glitchblocks">グリッチブロック</option>
+              </optgroup>
+              <optgroup label="サークル・シンメトリー">
+                <option value="circular">サークル</option>
+                <option value="radialDots">放射ドット</option>
+                <option value="polygon">ポリゴン</option>
+                <option value="auraring">オーラリング</option>
+                <option value="ringpulse">リングパルス</option>
+                <option value="petalring">ペタルリング</option>
+              </optgroup>
+              <optgroup label="おしゃれ・都会的">
+                <option value="smoothline">スムースライン</option>
+                <option value="liquidblob">リキッドブロブ</option>
+              </optgroup>
+              <optgroup label="アコースティック・チル">
+                <option value="particles">パーティクル</option>
+                <option value="orb">ブリージングオーブ</option>
+                <option value="vumeter">VUメーター</option>
+              </optgroup>
+              <optgroup label="その他">
+                <option value="dots">ドット</option>
+                <option value="oscilloscope">オシロスコープ</option>
+              </optgroup>
             </select>
           </label>
           <label class="preview-control">
@@ -1670,7 +1688,7 @@
   let eqEnabled = false;
   let eqRAF = null;
 
-  const EQ_TYPES = ['bars', 'mirror', 'wave', 'circular', 'dots', 'led', 'radialDots', 'polygon', 'rays', 'ripple', 'particles', 'orb', 'smoothline', 'auraring', 'oscilloscope'];
+  const EQ_TYPES = ['bars', 'mirror', 'wave', 'circular', 'dots', 'led', 'radialDots', 'polygon', 'rays', 'ripple', 'particles', 'orb', 'smoothline', 'auraring', 'neongrid', 'liquidblob', 'vumeter', 'ringpulse', 'petalring', 'glitchblocks', 'oscilloscope'];
   let eqStyle = {
     type: 'bars',
     colorStart: '#7fe9db',
@@ -2219,6 +2237,174 @@
     ctx.stroke();
   }
 
+  // Cyberpunk LED grid with a scanline sweep - suits EDM/synthwave/city pop.
+  function drawEqNeonGrid(ctx, w, h){
+    const barCount = eqStyle.barCount;
+    const values = getBarValues(barCount);
+    const rows = 10;
+    const colWidth = w / barCount;
+    const rowHeight = h / rows;
+    const gap = Math.min(colWidth, rowHeight) * 0.18;
+    for(let i = 0; i < barCount; i++){
+      const lit = Math.round(values[i] * rows);
+      const x = i * colWidth;
+      for(let r = 0; r < rows; r++){
+        const y = h - (r + 1) * rowHeight;
+        const on = r < lit;
+        const t = r / (rows - 1 || 1);
+        ctx.fillStyle = on ? hexToRgba(t < 0.5 ? eqStyle.colorStart : eqStyle.colorEnd, 0.85) : hexToRgba(eqStyle.colorEnd, 0.06);
+        ctx.fillRect(x + gap / 2, y + gap / 2, Math.max(1, colWidth - gap), Math.max(1, rowHeight - gap));
+      }
+    }
+    const scanY = h - ((performance.now() / 2500) % 1) * h;
+    ctx.fillStyle = hexToRgba(eqStyle.colorStart, 0.12);
+    ctx.fillRect(0, scanY, w, Math.max(1, h * 0.01));
+  }
+
+  // Soft blurred organic blob - suits lo-fi/chill/R&B where sharp shapes feel wrong.
+  function drawEqLiquidBlob(ctx, w, h){
+    const barCount = Math.max(10, eqStyle.barCount);
+    const values = getBarValues(barCount);
+    const cx = w / 2, cy = h / 2;
+    const baseRadius = Math.min(w, h) * 0.16;
+    const maxLen = Math.min(w, h) * 0.24;
+    const rotation = (performance.now() / 12000) % (Math.PI * 2);
+    const points = [];
+    for(let i = 0; i < barCount; i++){
+      const angle = (i / barCount) * Math.PI * 2 + rotation;
+      const r = baseRadius + values[i] * maxLen;
+      points.push({ x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r });
+    }
+    ctx.save();
+    if('filter' in ctx) ctx.filter = 'blur(6px)';
+    traceSmoothPath(ctx, points, true);
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, baseRadius + maxLen));
+    grad.addColorStop(0, hexToRgba(eqStyle.colorStart, 0.75));
+    grad.addColorStop(1, hexToRgba(eqStyle.colorEnd, 0.15));
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Retro analog dual-needle VU meters (L/R split across the bar range) -
+  // suits jazz/retro/vintage/lo-fi.
+  function drawEqVuMeter(ctx, w, h){
+    const barCount = eqStyle.barCount;
+    const values = getBarValues(barCount);
+    const half = Math.max(1, Math.floor(barCount / 2));
+    let leftAvg = 0, rightAvg = 0;
+    for(let i = 0; i < half; i++) leftAvg += values[i];
+    for(let i = half; i < barCount; i++) rightAvg += values[i];
+    leftAvg /= half;
+    rightAvg /= Math.max(1, barCount - half);
+    const minAngle = -Math.PI * 5 / 6, maxAngle = -Math.PI / 6;
+    [[leftAvg, 0], [rightAvg, 1]].forEach(function(pair){
+      const level = pair[0], idx = pair[1];
+      const meterW = w / 2;
+      const cx = meterW * idx + meterW / 2;
+      const cy = h * 0.86;
+      const radius = Math.min(meterW, h) * 0.5;
+      ctx.strokeStyle = hexToRgba(eqStyle.colorEnd, 0.2);
+      ctx.lineWidth = Math.max(2, radius * 0.05);
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, minAngle, maxAngle);
+      ctx.stroke();
+      const angle = minAngle + clamp(level, 0, 1) * (maxAngle - minAngle);
+      ctx.strokeStyle = eqStyle.colorStart;
+      ctx.lineWidth = Math.max(2, radius * 0.045);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(angle) * radius * 0.9, cy + Math.sin(angle) * radius * 0.9);
+      ctx.stroke();
+      ctx.fillStyle = eqStyle.colorStart;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * 0.07, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
+  // Concentric static rings whose thickness/brightness pulse per band -
+  // suits house/techno/minimal.
+  function drawEqRingPulse(ctx, w, h){
+    const barCount = Math.min(10, eqStyle.barCount);
+    const values = getBarValues(barCount);
+    const cx = w / 2, cy = h / 2;
+    const maxRadius = Math.min(w, h) * 0.46;
+    for(let i = 0; i < barCount; i++){
+      const t = i / barCount;
+      const r = maxRadius * (0.25 + t * 0.75);
+      const alpha = 0.15 + values[i] * 0.6;
+      ctx.strokeStyle = hexToRgba(i % 2 === 0 ? eqStyle.colorStart : eqStyle.colorEnd, alpha);
+      ctx.lineWidth = Math.max(1.5, (maxRadius / barCount) * 0.5 * (0.5 + values[i]));
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(1, r), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  // Rotating flower petals radiating from a core - suits idol/kawaii/ballad.
+  function drawEqPetalRing(ctx, w, h){
+    const barCount = Math.max(6, Math.min(24, eqStyle.barCount));
+    const values = getBarValues(barCount);
+    const cx = w / 2, cy = h / 2;
+    const baseRadius = Math.min(w, h) * 0.10;
+    const maxLen = Math.min(w, h) * 0.32;
+    const rotation = (performance.now() / 15000) % (Math.PI * 2);
+    for(let i = 0; i < barCount; i++){
+      const angle = (i / barCount) * Math.PI * 2 + rotation;
+      const len = baseRadius + values[i] * maxLen;
+      const petalWidth = (Math.PI * 2 / barCount) * 0.7;
+      const tipX = cx + Math.cos(angle) * len, tipY = cy + Math.sin(angle) * len;
+      const baseX1 = cx + Math.cos(angle - petalWidth / 2) * baseRadius, baseY1 = cy + Math.sin(angle - petalWidth / 2) * baseRadius;
+      const baseX2 = cx + Math.cos(angle + petalWidth / 2) * baseRadius, baseY2 = cy + Math.sin(angle + petalWidth / 2) * baseRadius;
+      const midLen = (baseRadius + len) / 2;
+      const ctrl1X = cx + Math.cos(angle - petalWidth / 2) * midLen, ctrl1Y = cy + Math.sin(angle - petalWidth / 2) * midLen;
+      const ctrl2X = cx + Math.cos(angle + petalWidth / 2) * midLen, ctrl2Y = cy + Math.sin(angle + petalWidth / 2) * midLen;
+      const grad = ctx.createLinearGradient(baseX1, baseY1, tipX, tipY);
+      grad.addColorStop(0, hexToRgba(eqStyle.colorEnd, 0.75));
+      grad.addColorStop(1, hexToRgba(eqStyle.colorStart, 0.9));
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(baseX1, baseY1);
+      ctx.quadraticCurveTo(ctrl1X, ctrl1Y, tipX, tipY);
+      ctx.quadraticCurveTo(ctrl2X, ctrl2Y, baseX2, baseY2);
+      ctx.closePath();
+      ctx.fill();
+    }
+    const coreR = baseRadius * 0.7;
+    ctx.fillStyle = hexToRgba(eqStyle.colorStart, 0.9);
+    ctx.beginPath();
+    ctx.arc(cx, cy, coreR, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // RGB-split glitchy blocks with time-jittered horizontal offset - suits
+  // glitch/hyperpop/experimental electronic.
+  function drawEqGlitchBlocks(ctx, w, h){
+    const barCount = eqStyle.barCount;
+    const values = getBarValues(barCount);
+    const barWidth = w / barCount;
+    const now = performance.now();
+    for(let i = 0; i < barCount; i++){
+      const barHeight = values[i] * h * 0.85;
+      const x = i * barWidth;
+      const bucket = Math.floor(now / 120) + i * 7;
+      const raw = Math.sin(bucket * 12.9898) * 43758.5453;
+      const jitter = raw - Math.floor(raw);
+      const offsetX = (jitter - 0.5) * barWidth * 0.6 * (values[i] > 0.55 ? 1 : 0.15);
+      const sliceCount = 3;
+      for(let s = 0; s < sliceCount; s++){
+        const sh = barHeight / sliceCount;
+        const sy = h - barHeight + s * sh;
+        const sOffset = offsetX * (s + 1) / sliceCount;
+        const color = s === 0 ? '#ff3d6e' : (s === 1 ? eqStyle.colorStart : eqStyle.colorEnd);
+        ctx.fillStyle = hexToRgba(color, 0.85);
+        ctx.fillRect(x + sOffset, sy, Math.max(1, barWidth - 2), sh + 1);
+      }
+    }
+  }
+
   function drawEqOscilloscope(ctx, w, h){
     const data = eqTimeDataArray;
     const len = data.length;
@@ -2269,6 +2455,12 @@
         case 'orb': drawEqOrb(ctx, rect.w, rect.h); break;
         case 'smoothline': drawEqSmoothLine(ctx, rect.w, rect.h); break;
         case 'auraring': drawEqAuraRing(ctx, rect.w, rect.h); break;
+        case 'neongrid': drawEqNeonGrid(ctx, rect.w, rect.h); break;
+        case 'liquidblob': drawEqLiquidBlob(ctx, rect.w, rect.h); break;
+        case 'vumeter': drawEqVuMeter(ctx, rect.w, rect.h); break;
+        case 'ringpulse': drawEqRingPulse(ctx, rect.w, rect.h); break;
+        case 'petalring': drawEqPetalRing(ctx, rect.w, rect.h); break;
+        case 'glitchblocks': drawEqGlitchBlocks(ctx, rect.w, rect.h); break;
         default: drawEqBars(ctx, rect.w, rect.h);
       }
     }
@@ -2352,20 +2544,28 @@
 
   /* ---------- EQ style: mood auto-generation ---------- */
   const MOOD_PRESETS = [
+    { label:'グリッチ・エクスペリメンタル', test: function(f){ return f.zcr > 0.11 && f.dynamics > 0.45; },
+      style:{ type:'glitchblocks', colorStart:'#00eaff', colorEnd:'#7c3dff', barCount:40, smoothing:0.35, glow:0.7, sensitivity:1.1 } },
     { label:'ダンス・中毒的', test: function(f){ return f.rms > 0.13 && f.zcr > 0.085; },
       style:{ type:'ripple', colorStart:'#ff3d9a', colorEnd:'#7c3dff', barCount:48, smoothing:0.55, glow:0.85, sensitivity:1.1 } },
     { label:'ロック・アンセム', test: function(f){ return f.rms > 0.12 && f.dynamics > 0.5; },
       style:{ type:'rays', colorStart:'#ff6a3d', colorEnd:'#ffd23d', barCount:40, smoothing:0.5, glow:0.75, sensitivity:1.1 } },
+    { label:'ハウス・ミニマル', test: function(f){ return f.rms > 0.11 && f.dynamics <= 0.35 && f.zcr <= 0.085; },
+      style:{ type:'ringpulse', colorStart:'#33d6c0', colorEnd:'#7c3dff', barCount:32, smoothing:0.6, glow:0.6, sensitivity:1.2 } },
     { label:'エネルギッシュ', test: function(f){ return f.rms > 0.10 && f.dynamics > 0.35; },
       style:{ type:'mirror', colorStart:'#ff6a3d', colorEnd:'#ffd23d', barCount:48, smoothing:0.55, glow:0.7, sensitivity:1.2 } },
     { label:'シャープ・煌びやか', test: function(f){ return f.zcr > 0.09; },
       style:{ type:'polygon', colorStart:'#7fe9ff', colorEnd:'#33d6c0', barCount:32, smoothing:0.6, glow:0.6, sensitivity:1.3 } },
     { label:'おしゃれ・都会的', test: function(f){ return f.zcr > 0.055; },
       style:{ type:'smoothline', colorStart:'#ff9ecf', colorEnd:'#7fe9ff', barCount:36, smoothing:0.7, glow:0.5, sensitivity:1.4 } },
+    { label:'レトロ・ジャズ', test: function(f){ return f.rms >= 0.05 && f.zcr < 0.04 && f.dynamics < 0.4; },
+      style:{ type:'vumeter', colorStart:'#ffcf9e', colorEnd:'#c9793f', barCount:24, smoothing:0.75, glow:0.4, sensitivity:1.5 } },
     { label:'アコースティック・優しい', test: function(f){ return f.rms < 0.07 && f.zcr < 0.05; },
       style:{ type:'orb', colorStart:'#ffcf9e', colorEnd:'#ff9f6a', barCount:24, smoothing:0.85, glow:0.55, sensitivity:2.0 } },
     { label:'エレガント・ムーディー', test: function(f){ return f.dynamics < 0.4 && f.rms >= 0.08; },
       style:{ type:'auraring', colorStart:'#c9a7ff', colorEnd:'#ff9ecf', barCount:28, smoothing:0.8, glow:0.65, sensitivity:1.6 } },
+    { label:'チル・ローファイ', test: function(f){ return f.zcr < 0.03; },
+      style:{ type:'liquidblob', colorStart:'#a7c7ff', colorEnd:'#ffb6d9', barCount:20, smoothing:0.8, glow:0.5, sensitivity:1.8 } },
     { label:'アンビエント・幻想的', test: function(f){ return f.rms < 0.05; },
       style:{ type:'particles', colorStart:'#a78bfa', colorEnd:'#33d6c0', barCount:24, smoothing:0.85, glow:0.7, sensitivity:2.2 } },
     { label:'重厚・落ち着き', test: function(f){ return f.dynamics < 0.35; },
@@ -3230,6 +3430,12 @@
           case 'orb': drawEqOrb(recordCtx, rect.w, rect.h); break;
           case 'smoothline': drawEqSmoothLine(recordCtx, rect.w, rect.h); break;
           case 'auraring': drawEqAuraRing(recordCtx, rect.w, rect.h); break;
+          case 'neongrid': drawEqNeonGrid(recordCtx, rect.w, rect.h); break;
+          case 'liquidblob': drawEqLiquidBlob(recordCtx, rect.w, rect.h); break;
+          case 'vumeter': drawEqVuMeter(recordCtx, rect.w, rect.h); break;
+          case 'ringpulse': drawEqRingPulse(recordCtx, rect.w, rect.h); break;
+          case 'petalring': drawEqPetalRing(recordCtx, rect.w, rect.h); break;
+          case 'glitchblocks': drawEqGlitchBlocks(recordCtx, rect.w, rect.h); break;
           default: drawEqBars(recordCtx, rect.w, rect.h);
         }
       }
