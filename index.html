@@ -9436,7 +9436,13 @@ export function createThreeEq(){
   function renderPreviewAll(){
     previewAll.innerHTML = '';
     previewLineEls = {};
-    previewActiveIdx = -1;
+    // NaN, not -1: -1 is a legitimate "no active line" value that
+    // updateLyricsPreview() may also compute for the new data, and NaN!==NaN
+    // is always true, so the next updateLyricsPreview() call is guaranteed to
+    // treat it as a change and actually refresh the single-line preview text
+    // instead of leaving stale text from whatever was shown before (e.g. after
+    // switching to a project whose lyrics table is empty).
+    previewActiveIdx = NaN;
     const topSpacer = document.createElement('div');
     topSpacer.className = 'preview-all-spacer';
     previewAll.appendChild(topSpacer);
