@@ -329,6 +329,14 @@
     background:var(--panel2);cursor:pointer;
   }
   .preview-control input[type=range]{width:88px;accent-color:var(--accent);}
+  .eq-color-preset-control{align-items:flex-start;}
+  .eq-color-preset-list{display:flex;flex-wrap:wrap;gap:5px;max-width:220px;}
+  .eq-color-preset-swatch{
+    width:24px;height:24px;padding:0;border-radius:7px;flex:none;cursor:pointer;
+    border:2px solid var(--line);box-sizing:border-box;
+  }
+  .eq-color-preset-swatch:hover{border-color:var(--accent-dim);}
+  .eq-color-preset-swatch.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
   .preview-control input[type=text]{
     background:var(--panel2);border:1px solid var(--line);color:var(--text);
     border-radius:6px;padding:5px 8px;font-size:12px;width:220px;
@@ -825,6 +833,11 @@
           <label class="toggle-btn" for="previewBgInput">背景を設定（画像/動画）</label>
           <input type="file" id="previewBgInput" accept="image/*,video/*" style="display:none">
           <button class="toggle-btn" type="button" id="previewBgClearBtn" disabled>背景をクリア</button>
+          <button class="toggle-btn active" type="button" id="previewBgVisibleToggle" disabled>背景を表示</button>
+          <label class="preview-control">
+            <span>背景の透過度</span>
+            <input type="range" id="bgOpacity" min="0" max="1" step="0.05" value="1">
+          </label>
           <label class="preview-control">
             <span>背景サイズ</span>
             <select id="bgSizeMode">
@@ -913,6 +926,24 @@
               </optgroup>
             </select>
           </label>
+          <div class="preview-control eq-color-preset-control">
+            <span>カラーパターン</span>
+            <div class="eq-color-preset-list" id="eqColorPresetList">
+              <button type="button" class="eq-color-preset-swatch" data-start="#7fe9db" data-end="#33d6c0" title="シアン×ブルー" style="background:linear-gradient(135deg,#7fe9db,#33d6c0)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#ff6a3d" data-end="#ffd23d" title="サンセット" style="background:linear-gradient(135deg,#ff6a3d,#ffd23d)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#ff3d9a" data-end="#7c3dff" title="ネオンピンク" style="background:linear-gradient(135deg,#ff3d9a,#7c3dff)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#a78bfa" data-end="#33d6c0" title="エレクトリックパープル" style="background:linear-gradient(135deg,#a78bfa,#33d6c0)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#ffcf9e" data-end="#c9793f" title="ゴールド" style="background:linear-gradient(135deg,#ffcf9e,#c9793f)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#a7c7ff" data-end="#7fe9ff" title="アイスブルー" style="background:linear-gradient(135deg,#a7c7ff,#7fe9ff)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#ff9f6a" data-end="#7a3320" title="フレイム" style="background:linear-gradient(135deg,#ff9f6a,#7a3320)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#f5f5f5" data-end="#8a8a8a" title="モノクローム" style="background:linear-gradient(135deg,#f5f5f5,#8a8a8a)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#ff9ecf" data-end="#7fe9ff" title="キャンディ" style="background:linear-gradient(135deg,#ff9ecf,#7fe9ff)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#d4ff3d" data-end="#33d6c0" title="ライム" style="background:linear-gradient(135deg,#d4ff3d,#33d6c0)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#ffb6d9" data-end="#a78bfa" title="ローズ" style="background:linear-gradient(135deg,#ffb6d9,#a78bfa)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#7fe9ff" data-end="#33d6c0" title="ミント" style="background:linear-gradient(135deg,#7fe9ff,#33d6c0)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#00d4ff" data-end="#ff2d95" title="エクリプス" style="background:linear-gradient(135deg,#00d4ff,#ff2d95)"></button>
+            </div>
+          </div>
           <label class="preview-control">
             <span>カラー1</span>
             <input type="color" id="eqColorStart" value="#7fe9db">
@@ -931,7 +962,7 @@
           </label>
           <label class="preview-control" title="曲が静かでEQがあまり動かない時は上げてください">
             <span>感度（基準レベル）</span>
-            <input type="range" id="eqSensitivity" min="0.5" max="3" step="0.1" value="1">
+            <input type="range" id="eqSensitivity" min="0.05" max="3" step="0.05" value="1">
           </label>
           <label class="preview-control">
             <span>グロー</span>
@@ -5446,6 +5477,8 @@ export function createThreeEq(){
   const previewEqCanvas = document.getElementById('previewEqCanvas');
   const previewBgInput = document.getElementById('previewBgInput');
   const previewBgClearBtn = document.getElementById('previewBgClearBtn');
+  const previewBgVisibleToggle = document.getElementById('previewBgVisibleToggle');
+  const bgOpacityInput = document.getElementById('bgOpacity');
   const previewBgVideo = document.getElementById('previewBgVideo');
   const bgSizeModeSelect = document.getElementById('bgSizeMode');
   const bgZoomInput = document.getElementById('bgZoom');
@@ -5466,6 +5499,7 @@ export function createThreeEq(){
   const previewPopupFullscreenBtn = document.getElementById('previewPopupFullscreenBtn');
   const previewPopupCloseBtn = document.getElementById('previewPopupCloseBtn');
   const eqStyleTypeSelect = document.getElementById('eqStyleType');
+  const eqColorPresetList = document.getElementById('eqColorPresetList');
   const eqColorStartInput = document.getElementById('eqColorStart');
   const eqColorEndInput = document.getElementById('eqColorEnd');
   const eqBarCountInput = document.getElementById('eqBarCount');
@@ -5491,6 +5525,7 @@ export function createThreeEq(){
   let previewBgUrl = null;
   let currentBgKind = null; // 'image' | 'video' | null
   let currentBgFile = null;
+  let bgVisible = true;
 
   const SYSTEM_FONTS = [
     { key:'sans', label:'ゴシック（システム）', css: "-apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', 'Segoe UI', sans-serif" },
@@ -5806,6 +5841,23 @@ export function createThreeEq(){
     el.addEventListener('input', applyBgTransform);
   });
   applyBgTransform();
+
+  function applyBgOpacity(){
+    previewBg.style.opacity = bgOpacityInput.value;
+  }
+  bgOpacityInput.addEventListener('input', applyBgOpacity);
+  applyBgOpacity();
+
+  function applyBgVisibility(){
+    previewBg.style.visibility = bgVisible ? '' : 'hidden';
+    previewBgVisibleToggle.classList.toggle('active', bgVisible);
+  }
+  previewBgVisibleToggle.addEventListener('click', function(){
+    bgVisible = !bgVisible;
+    applyBgVisibility();
+    scheduleSaveSession();
+  });
+  applyBgVisibility();
   previewBgVideo.addEventListener('loadedmetadata', applyBgVideoLayout);
   if(typeof ResizeObserver !== 'undefined'){
     new ResizeObserver(applyBgVideoLayout).observe(previewStage);
@@ -5943,6 +5995,7 @@ export function createThreeEq(){
     }
     previewBg.classList.add('has-image');
     previewBgClearBtn.disabled = false;
+    previewBgVisibleToggle.disabled = false;
   }
 
   previewBgInput.addEventListener('change', function(e){
@@ -5960,6 +6013,9 @@ export function createThreeEq(){
     previewBg.classList.remove('has-image');
     clearPreviewBgVideo();
     previewBgClearBtn.disabled = true;
+    previewBgVisibleToggle.disabled = true;
+    bgVisible = true;
+    applyBgVisibility();
     previewBgInput.value = '';
     loadPreviewBgImage(null);
   }
@@ -7110,6 +7166,7 @@ export function createThreeEq(){
     eqPosYSelect.value = style.posY;
     eqWidthInput.value = style.width;
     eqHeightInput.value = style.height;
+    markActiveColorPresetSwatch();
   }
 
   function setEqStyle(style){
@@ -7119,8 +7176,24 @@ export function createThreeEq(){
   }
 
   eqStyleTypeSelect.addEventListener('change', function(){ eqStyle.type = eqStyleTypeSelect.value; });
-  eqColorStartInput.addEventListener('input', function(){ eqStyle.colorStart = eqColorStartInput.value; });
-  eqColorEndInput.addEventListener('input', function(){ eqStyle.colorEnd = eqColorEndInput.value; });
+  function markActiveColorPresetSwatch(){
+    const swatches = eqColorPresetList.querySelectorAll('.eq-color-preset-swatch');
+    for(let i = 0; i < swatches.length; i++){
+      const sw = swatches[i];
+      sw.classList.toggle('active', sw.dataset.start === eqStyle.colorStart && sw.dataset.end === eqStyle.colorEnd);
+    }
+  }
+  eqColorPresetList.addEventListener('click', function(e){
+    const btn = e.target.closest('.eq-color-preset-swatch');
+    if(!btn) return;
+    eqStyle.colorStart = btn.dataset.start;
+    eqStyle.colorEnd = btn.dataset.end;
+    eqColorStartInput.value = btn.dataset.start;
+    eqColorEndInput.value = btn.dataset.end;
+    markActiveColorPresetSwatch();
+  });
+  eqColorStartInput.addEventListener('input', function(){ eqStyle.colorStart = eqColorStartInput.value; markActiveColorPresetSwatch(); });
+  eqColorEndInput.addEventListener('input', function(){ eqStyle.colorEnd = eqColorEndInput.value; markActiveColorPresetSwatch(); });
   eqBarCountInput.addEventListener('input', function(){
     eqStyle.barCount = parseInt(eqBarCountInput.value, 10);
   });
@@ -7545,7 +7618,7 @@ export function createThreeEq(){
       posY: ['top','center','bottom'].indexOf(obj.posY) !== -1 ? obj.posY : 'center',
       width: clamp(parseInt(obj.width, 10) || 100, 10, 100),
       height: clamp(parseInt(obj.height, 10) || 100, 10, 100),
-      sensitivity: clamp(isNaN(parseFloat(obj.sensitivity)) ? 1.5 : parseFloat(obj.sensitivity), 0.5, 3),
+      sensitivity: clamp(isNaN(parseFloat(obj.sensitivity)) ? 1.5 : parseFloat(obj.sensitivity), 0.05, 3),
       opacity: clamp(isNaN(parseFloat(obj.opacity)) ? 1 : parseFloat(obj.opacity), 0.1, 1)
     };
   }
@@ -7595,7 +7668,9 @@ export function createThreeEq(){
         posX: bgPosXInput.value,
         posY: bgPosYInput.value,
         loopEffect: bgLoopEffectSelect.value,
-        loopFadeDuration: bgLoopFadeDurationInput.value
+        loopFadeDuration: bgLoopFadeDurationInput.value,
+        opacity: bgOpacityInput.value,
+        visible: bgVisible
       },
       highlightMode: previewAll.classList.contains('highlight-text-only') ? 'text' : 'line',
       eq: eqStyle
@@ -7665,6 +7740,10 @@ export function createThreeEq(){
     if(bgModeOptionExists) bgSizeModeSelect.value = bg.sizeMode;
     if(['none','fade'].indexOf(bg.loopEffect) !== -1) bgLoopEffectSelect.value = bg.loopEffect;
     if(typeof bg.loopFadeDuration !== 'undefined') bgLoopFadeDurationInput.value = clampInputValue(bgLoopFadeDurationInput, bg.loopFadeDuration, bgLoopFadeDurationInput.value);
+    if(typeof bg.opacity !== 'undefined') bgOpacityInput.value = clampInputValue(bgOpacityInput, bg.opacity, bgOpacityInput.value);
+    applyBgOpacity();
+    bgVisible = typeof bg.visible === 'boolean' ? bg.visible : true;
+    applyBgVisibility();
     applyBgTransform();
 
     applyPreviewStyle();
@@ -7773,6 +7852,7 @@ export function createThreeEq(){
   }
 
   function getBgDrawSource(){
+    if(!bgVisible) return null;
     if(currentBgKind === 'video'){
       const v = previewBgVideo;
       if(v.readyState >= 2 && v.videoWidth) return { el: v, w: v.videoWidth, h: v.videoHeight };
@@ -7815,7 +7895,7 @@ export function createThreeEq(){
       scale
     );
     const prevAlpha = ctx.globalAlpha;
-    ctx.globalAlpha = prevAlpha * getBgVideoLoopAlpha();
+    ctx.globalAlpha = prevAlpha * getBgVideoLoopAlpha() * parseFloat(bgOpacityInput.value);
     ctx.drawImage(source.el, rect.x, rect.y, rect.w, rect.h);
     ctx.globalAlpha = prevAlpha;
     if(previewBg.classList.contains('has-image')){
@@ -8583,6 +8663,18 @@ export function createThreeEq(){
         }
       });
       startRow.appendChild(prevSyncBtn);
+      const nowStartBtn = document.createElement('button');
+      nowStartBtn.className = 'rowbtn';
+      nowStartBtn.textContent = '⏱';
+      nowStartBtn.title = '現在の再生位置を開始時間にセット';
+      if(line.isMeta || line.isBlank) nowStartBtn.disabled = true;
+      nowStartBtn.addEventListener('click', function(){
+        if(!audioEl.src){ setStatus('先に音源ファイルを開いてください', 'err'); return; }
+        line.start = audioEl.currentTime;
+        renderTable();
+        setStatus((i+1) + '行目: 開始時間に現在の再生位置をセットしました', 'ok');
+      });
+      startRow.appendChild(nowStartBtn);
       startRow.appendChild(makeTimeInput(line, 'start'));
       tdStart.appendChild(startRow);
       tr.appendChild(tdStart);
@@ -8593,6 +8685,18 @@ export function createThreeEq(){
       const endRow = document.createElement('div');
       endRow.className = 'time-cell-row';
       endRow.appendChild(makeTimeInput(line, 'end'));
+      const nowEndBtn = document.createElement('button');
+      nowEndBtn.className = 'rowbtn';
+      nowEndBtn.textContent = '⏱';
+      nowEndBtn.title = '現在の再生位置を終了時間にセット';
+      if(line.isMeta || line.isBlank) nowEndBtn.disabled = true;
+      nowEndBtn.addEventListener('click', function(){
+        if(!audioEl.src){ setStatus('先に音源ファイルを開いてください', 'err'); return; }
+        line.end = audioEl.currentTime;
+        renderTable();
+        setStatus((i+1) + '行目: 終了時間に現在の再生位置をセットしました', 'ok');
+      });
+      endRow.appendChild(nowEndBtn);
       const syncBtn = document.createElement('button');
       syncBtn.className = 'rowbtn';
       syncBtn.textContent = '⇥';
@@ -9444,6 +9548,7 @@ export function createThreeEq(){
       }
       previewBg.classList.add('has-image');
       previewBgClearBtn.disabled = false;
+      previewBgVisibleToggle.disabled = false;
     }
 
     applyFullPreviewSettings(record.previewSettings || DEFAULT_PREVIEW_SETTINGS);
