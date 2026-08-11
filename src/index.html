@@ -46,6 +46,15 @@
   }
   .brand .sub{font-size:11px;color:var(--muted2);letter-spacing:.06em;}
 
+  .projectbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
+  .projectbar-label{font-size:11px;color:var(--muted2);letter-spacing:.04em;white-space:nowrap;}
+  .projectbar select{
+    background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    border-radius:8px;padding:7px 10px;font-size:12.5px;cursor:pointer;max-width:220px;
+  }
+  .projectbar select:focus{outline:none;border-color:var(--accent-dim);}
+  .projectbar .ghost-btn.small{padding:6px 11px;}
+
   .filebar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
   .filebtn{
     display:inline-flex;align-items:center;gap:8px;
@@ -585,6 +594,14 @@
       <span class="mark">SRT MAKER</span>
       <span class="sub">MV字幕(.srt)自動生成ツール</span>
     </div>
+    <div class="projectbar" id="projectBar">
+      <span class="projectbar-label">プロジェクト</span>
+      <select id="projectSelect"></select>
+      <button class="ghost-btn small" type="button" id="projectNewBtn" title="新規プロジェクトを作成">＋新規</button>
+      <button class="ghost-btn small" type="button" id="projectRenameBtn" title="プロジェクト名を変更">名前変更</button>
+      <button class="ghost-btn small" type="button" id="projectDuplicateBtn" title="プロジェクトを複製">複製</button>
+      <button class="ghost-btn small" type="button" id="projectDeleteBtn" title="プロジェクトを削除">削除</button>
+    </div>
     <div class="filebar">
       <label class="filebtn" for="audioInput">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
@@ -1053,6 +1070,7 @@
   /* ===================== State ===================== */
   let lyricsLines = [];      // {id, text, isMeta, isBlank, start, end}
   let currentIndex = -1;     // index into lyricsLines currently targeted by SET
+  let currentProjectId = null;
   let uid = 1;
   let isSpaceDown = false;
   let isSetEngaged = false;
@@ -1101,6 +1119,11 @@
   const lyricsInput = document.getElementById('lyricsInput');
   const srtInput = document.getElementById('srtInput');
   const audioFileName = document.getElementById('audioFileName');
+  const projectSelect = document.getElementById('projectSelect');
+  const projectNewBtn = document.getElementById('projectNewBtn');
+  const projectRenameBtn = document.getElementById('projectRenameBtn');
+  const projectDuplicateBtn = document.getElementById('projectDuplicateBtn');
+  const projectDeleteBtn = document.getElementById('projectDeleteBtn');
   const lyricsFileName = document.getElementById('lyricsFileName');
 
   const playBtn = document.getElementById('playBtn');
@@ -1680,7 +1703,7 @@
     setPreviewBgFile(file);
   });
 
-  previewBgClearBtn.addEventListener('click', function(){
+  function clearPreviewBgState(){
     if(previewBgUrl) URL.revokeObjectURL(previewBgUrl);
     previewBgUrl = null;
     currentBgFile = null;
@@ -1691,7 +1714,8 @@
     previewBgClearBtn.disabled = true;
     previewBgInput.value = '';
     loadPreviewBgImage(null);
-  });
+  }
+  previewBgClearBtn.addEventListener('click', clearPreviewBgState);
 
   /* ===================== Graphic equalizer ===================== */
   let audioCtx = null;
@@ -4840,119 +4864,424 @@
     setStatus(entries.length + '行のSRTファイルを保存しました（メタタグは除去済み）', 'ok');
   });
 
-  /* ===================== Session persistence (survive page reload) ===================== */
+  /* ===================== Project persistence (multi-project, survives reload) ===================== */
+  // Everything lives in one browser-local IndexedDB - there is no server, so
+  // "projects" are just multiple named records the user can switch between,
+  // with no login/account needed. version 1 only ever held a single
+  // unnamed "session" record; version 2 adds a `projects` store (one record
+  // per project) and a `meta` store remembering which project is active. The
+  // old `state` store is kept around (not deleted) purely so a one-time
+  // migration can read whatever was there and fold it into a real project.
   const SESSION_DB_NAME = 'srt-maker-session';
-  const SESSION_DB_VERSION = 1;
+  const SESSION_DB_VERSION = 2;
   const SESSION_STORE = 'state';
   const SESSION_KEY = 'session';
+  const PROJECTS_STORE = 'projects';
+  const META_STORE = 'meta';
+  const META_KEY = 'app';
   let sessionDbPromise = null;
   let saveSessionTimer = null;
   let sessionRestoring = false;
+  let DEFAULT_PREVIEW_SETTINGS = null;
 
   function openSessionDb(){
     if(typeof indexedDB === 'undefined') return Promise.reject(new Error('IndexedDB unavailable'));
     if(sessionDbPromise) return sessionDbPromise;
     sessionDbPromise = new Promise(function(resolve, reject){
       const req = indexedDB.open(SESSION_DB_NAME, SESSION_DB_VERSION);
-      req.onupgradeneeded = function(){ req.result.createObjectStore(SESSION_STORE); };
+      req.onupgradeneeded = function(){
+        const db = req.result;
+        if(!db.objectStoreNames.contains(SESSION_STORE)) db.createObjectStore(SESSION_STORE);
+        if(!db.objectStoreNames.contains(PROJECTS_STORE)) db.createObjectStore(PROJECTS_STORE, { keyPath: 'id' });
+        if(!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE);
+      };
       req.onsuccess = function(){ resolve(req.result); };
       req.onerror = function(){ reject(req.error); };
     });
     return sessionDbPromise;
   }
 
-  function saveSessionState(){
+  function genProjectId(){
+    return 'p_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+  }
+
+  function buildProjectRecord(name){
+    return {
+      id: genProjectId(),
+      name: name,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      audioFile: null,
+      audioFileName: '未選択',
+      bgImageFile: null,
+      bgKind: null,
+      lyricsFileName: '未選択',
+      lyricsLines: [],
+      uid: 1,
+      previewSettings: null
+    };
+  }
+
+  function listProjects(){
     return openSessionDb().then(function(db){
       return new Promise(function(resolve, reject){
-        const tx = db.transaction(SESSION_STORE, 'readwrite');
-        tx.objectStore(SESSION_STORE).put({
-          version: 1,
-          savedAt: Date.now(),
-          audioFile: currentAudioFile || null,
-          audioFileName: audioFileName.textContent,
-          bgImageFile: currentBgFile || null,
-          bgKind: currentBgKind || null,
-          lyricsFileName: lyricsFileName.textContent,
-          lyricsLines: lyricsLines,
-          uid: uid,
-          previewSettings: getFullPreviewSettings()
-        }, SESSION_KEY);
+        const tx = db.transaction(PROJECTS_STORE, 'readonly');
+        const req = tx.objectStore(PROJECTS_STORE).getAll();
+        req.onsuccess = function(){ resolve(req.result || []); };
+        req.onerror = function(){ reject(req.error); };
+      });
+    });
+  }
+
+  function getProject(id){
+    return openSessionDb().then(function(db){
+      return new Promise(function(resolve, reject){
+        const tx = db.transaction(PROJECTS_STORE, 'readonly');
+        const req = tx.objectStore(PROJECTS_STORE).get(id);
+        req.onsuccess = function(){ resolve(req.result || null); };
+        req.onerror = function(){ reject(req.error); };
+      });
+    });
+  }
+
+  function putProject(record){
+    return openSessionDb().then(function(db){
+      return new Promise(function(resolve, reject){
+        const tx = db.transaction(PROJECTS_STORE, 'readwrite');
+        tx.objectStore(PROJECTS_STORE).put(record);
         tx.oncomplete = function(){ resolve(); };
         tx.onerror = function(){ reject(tx.error); };
       });
     });
   }
 
-  function scheduleSaveSession(){
-    if(sessionRestoring) return; // don't overwrite the saved session while we're still loading it
-    if(saveSessionTimer) clearTimeout(saveSessionTimer);
-    saveSessionTimer = setTimeout(function(){
-      saveSessionTimer = null;
-      saveSessionState().catch(function(err){ console.warn('[srt-maker] 自動保存に失敗しました', err); });
-    }, 800);
+  function deleteProjectRecord(id){
+    return openSessionDb().then(function(db){
+      return new Promise(function(resolve, reject){
+        const tx = db.transaction(PROJECTS_STORE, 'readwrite');
+        tx.objectStore(PROJECTS_STORE).delete(id);
+        tx.oncomplete = function(){ resolve(); };
+        tx.onerror = function(){ reject(tx.error); };
+      });
+    });
   }
 
-  function restoreSessionState(){
+  function setCurrentProjectId(id){
+    currentProjectId = id;
     return openSessionDb().then(function(db){
+      return new Promise(function(resolve, reject){
+        const tx = db.transaction(META_STORE, 'readwrite');
+        tx.objectStore(META_STORE).put({ currentProjectId: id }, META_KEY);
+        tx.oncomplete = function(){ resolve(); };
+        tx.onerror = function(){ reject(tx.error); };
+      });
+    });
+  }
+
+  function getCurrentProjectId(){
+    return openSessionDb().then(function(db){
+      return new Promise(function(resolve, reject){
+        const tx = db.transaction(META_STORE, 'readonly');
+        const req = tx.objectStore(META_STORE).get(META_KEY);
+        req.onsuccess = function(){ resolve(req.result ? req.result.currentProjectId : null); };
+        req.onerror = function(){ reject(req.error); };
+      });
+    });
+  }
+
+  function getLegacySession(){
+    return openSessionDb().then(function(db){
+      if(!db.objectStoreNames.contains(SESSION_STORE)) return null;
       return new Promise(function(resolve, reject){
         const tx = db.transaction(SESSION_STORE, 'readonly');
         const req = tx.objectStore(SESSION_STORE).get(SESSION_KEY);
         req.onsuccess = function(){ resolve(req.result || null); };
         req.onerror = function(){ reject(req.error); };
       });
+    });
+  }
+
+  function deleteLegacySession(){
+    return openSessionDb().then(function(db){
+      if(!db.objectStoreNames.contains(SESSION_STORE)) return;
+      return new Promise(function(resolve, reject){
+        const tx = db.transaction(SESSION_STORE, 'readwrite');
+        tx.objectStore(SESSION_STORE).delete(SESSION_KEY);
+        tx.oncomplete = function(){ resolve(); };
+        tx.onerror = function(){ reject(tx.error); };
+      });
+    });
+  }
+
+  function saveCurrentProject(){
+    if(!currentProjectId) return Promise.resolve();
+    return getProject(currentProjectId).then(function(existing){
+      const record = {
+        id: currentProjectId,
+        name: (existing && existing.name) || '無題のプロジェクト',
+        createdAt: (existing && existing.createdAt) || Date.now(),
+        updatedAt: Date.now(),
+        audioFile: currentAudioFile || null,
+        audioFileName: audioFileName.textContent,
+        bgImageFile: currentBgFile || null,
+        bgKind: currentBgKind || null,
+        lyricsFileName: lyricsFileName.textContent,
+        lyricsLines: lyricsLines,
+        uid: uid,
+        previewSettings: getFullPreviewSettings()
+      };
+      return putProject(record);
+    });
+  }
+
+  function scheduleSaveSession(){
+    if(sessionRestoring) return; // don't overwrite the project while we're still loading it
+    if(saveSessionTimer) clearTimeout(saveSessionTimer);
+    saveSessionTimer = setTimeout(function(){
+      saveSessionTimer = null;
+      saveCurrentProject().catch(function(err){ console.warn('[srt-maker] 自動保存に失敗しました', err); });
+    }, 800);
+  }
+
+  function clearAudioState(){
+    if(currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
+    currentAudioUrl = null;
+    currentAudioFile = null;
+    audioEl.pause();
+    audioEl.removeAttribute('src');
+    audioEl.load();
+    audioFileName.textContent = '未選択';
+    seek.value = 0;
+    seek.max = 0;
+    seek.disabled = true;
+    updateTimeDisplay();
+  }
+
+  // Loads a project record into the live app state - used both for the
+  // initial page-load restore and for switching between projects. Always
+  // clears audio/background first so switching from a project that has them
+  // to one that doesn't can't leave stale state behind.
+  function applyProjectRecord(record){
+    sessionRestoring = true;
+
+    lyricsLines = Array.isArray(record.lyricsLines) ? record.lyricsLines : [];
+    uid = record.uid || (lyricsLines.length ? Math.max.apply(null, lyricsLines.map(function(l){ return l.id; })) + 1 : 1);
+    lyricsFileName.textContent = record.lyricsFileName || '未選択';
+    selectedIds.clear();
+    currentIndex = firstTimeableIndex(0);
+    renderTable();
+    updateBulkToolbar();
+
+    clearAudioState();
+    if(record.audioFile){
+      currentAudioFile = record.audioFile;
+      const url = URL.createObjectURL(record.audioFile);
+      currentAudioUrl = url;
+      audioEl.src = url;
+      audioEl.load();
+      audioFileName.textContent = record.audioFileName || '未選択';
+    }
+
+    clearPreviewBgState();
+    if(record.bgImageFile){
+      currentBgFile = record.bgImageFile;
+      currentBgKind = record.bgKind || 'image'; // older saved records predate video support
+      previewBgUrl = URL.createObjectURL(record.bgImageFile);
+      if(currentBgKind === 'video'){
+        previewBg.style.backgroundImage = '';
+        previewBgImageEl = null;
+        activateBgVideo(previewBgUrl);
+      } else {
+        previewBg.style.backgroundImage = 'url(' + previewBgUrl + ')';
+        loadPreviewBgImage(record.bgImageFile);
+      }
+      previewBg.classList.add('has-image');
+      previewBgClearBtn.disabled = false;
+    }
+
+    applyFullPreviewSettings(record.previewSettings || DEFAULT_PREVIEW_SETTINGS);
+
+    sessionRestoring = false;
+  }
+
+  function refreshProjectList(){
+    return listProjects().then(function(projects){
+      projects.sort(function(a, b){ return (b.updatedAt || 0) - (a.updatedAt || 0); });
+      projectSelect.innerHTML = '';
+      projects.forEach(function(p){
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name;
+        if(p.id === currentProjectId) opt.selected = true;
+        projectSelect.appendChild(opt);
+      });
+      return projects;
+    });
+  }
+
+  function switchToProject(id){
+    if(!id || id === currentProjectId) return Promise.resolve();
+    return saveCurrentProject().then(function(){
+      return getProject(id);
     }).then(function(record){
       if(!record) return;
-      sessionRestoring = true;
-      let restoredSomething = false;
+      return setCurrentProjectId(id).then(function(){
+        applyProjectRecord(record);
+        return refreshProjectList();
+      }).then(function(){
+        setStatus('プロジェクト「' + record.name + '」を開きました', 'ok');
+      });
+    }).catch(function(err){
+      console.warn('[srt-maker] プロジェクトの切り替えに失敗しました', err);
+      setStatus('プロジェクトの切り替えに失敗しました', 'err');
+    });
+  }
 
-      if(Array.isArray(record.lyricsLines) && record.lyricsLines.length){
-        lyricsLines = record.lyricsLines;
-        uid = record.uid || (Math.max.apply(null, lyricsLines.map(function(l){ return l.id; })) + 1);
-        if(record.lyricsFileName) lyricsFileName.textContent = record.lyricsFileName;
-        currentIndex = firstTimeableIndex(0);
-        renderTable();
-        restoredSomething = true;
+  function createNewProject(){
+    return saveCurrentProject().then(function(){
+      const name = window.prompt('新しいプロジェクト名を入力してください', '新しいプロジェクト');
+      if(name === null) return;
+      const record = buildProjectRecord((name || '').trim() || '無題のプロジェクト');
+      return putProject(record).then(function(){
+        return setCurrentProjectId(record.id);
+      }).then(function(){
+        applyProjectRecord(record);
+        return refreshProjectList();
+      }).then(function(){
+        setStatus('新しいプロジェクト「' + record.name + '」を作成しました', 'ok');
+      });
+    }).catch(function(err){
+      console.warn('[srt-maker] プロジェクトの作成に失敗しました', err);
+      setStatus('プロジェクトの作成に失敗しました', 'err');
+    });
+  }
+
+  function renameCurrentProject(){
+    if(!currentProjectId) return;
+    getProject(currentProjectId).then(function(record){
+      if(!record) return;
+      const name = window.prompt('プロジェクト名を変更', record.name);
+      if(name === null) return;
+      const trimmed = (name || '').trim();
+      if(!trimmed) return;
+      record.name = trimmed;
+      record.updatedAt = Date.now();
+      return putProject(record).then(function(){
+        return refreshProjectList();
+      }).then(function(){
+        setStatus('プロジェクト名を変更しました', 'ok');
+      });
+    }).catch(function(err){
+      console.warn('[srt-maker] プロジェクト名の変更に失敗しました', err);
+      setStatus('プロジェクト名の変更に失敗しました', 'err');
+    });
+  }
+
+  function duplicateCurrentProject(){
+    if(!currentProjectId) return;
+    saveCurrentProject().then(function(){
+      return getProject(currentProjectId);
+    }).then(function(record){
+      if(!record) return;
+      const copy = Object.assign({}, record, {
+        id: genProjectId(),
+        name: record.name + ' のコピー',
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
+      return putProject(copy).then(function(){
+        return setCurrentProjectId(copy.id);
+      }).then(function(){
+        applyProjectRecord(copy);
+        return refreshProjectList();
+      }).then(function(){
+        setStatus('プロジェクトを複製しました', 'ok');
+      });
+    }).catch(function(err){
+      console.warn('[srt-maker] プロジェクトの複製に失敗しました', err);
+      setStatus('プロジェクトの複製に失敗しました', 'err');
+    });
+  }
+
+  function deleteCurrentProject(){
+    if(!currentProjectId) return;
+    listProjects().then(function(projects){
+      if(projects.length <= 1){
+        setStatus('最後の1つのプロジェクトは削除できません', 'err');
+        return;
       }
+      const current = projects.find(function(p){ return p.id === currentProjectId; });
+      const label = current ? current.name : 'このプロジェクト';
+      if(!window.confirm('プロジェクト「' + label + '」を削除します。この操作は元に戻せません。よろしいですか？')) return;
+      return deleteProjectRecord(currentProjectId).then(function(){
+        return listProjects();
+      }).then(function(remaining){
+        remaining.sort(function(a, b){ return (b.updatedAt || 0) - (a.updatedAt || 0); });
+        const next = remaining[0];
+        return setCurrentProjectId(next.id).then(function(){
+          applyProjectRecord(next);
+          return refreshProjectList();
+        });
+      }).then(function(){
+        setStatus('プロジェクトを削除しました', 'ok');
+      });
+    }).catch(function(err){
+      console.warn('[srt-maker] プロジェクトの削除に失敗しました', err);
+      setStatus('プロジェクトの削除に失敗しました', 'err');
+    });
+  }
 
-      if(record.audioFile){
-        if(currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
-        currentAudioFile = record.audioFile;
-        const url = URL.createObjectURL(record.audioFile);
-        currentAudioUrl = url;
-        audioEl.src = url;
-        audioEl.load();
-        audioFileName.textContent = record.audioFileName || audioFileName.textContent;
-        restoredSomething = true;
-      }
+  projectSelect.addEventListener('change', function(){ switchToProject(projectSelect.value); });
+  projectNewBtn.addEventListener('click', createNewProject);
+  projectRenameBtn.addEventListener('click', renameCurrentProject);
+  projectDuplicateBtn.addEventListener('click', duplicateCurrentProject);
+  projectDeleteBtn.addEventListener('click', deleteCurrentProject);
 
-      if(record.bgImageFile){
-        if(previewBgUrl) URL.revokeObjectURL(previewBgUrl);
-        currentBgFile = record.bgImageFile;
-        currentBgKind = record.bgKind || 'image'; // older saved sessions predate video support
-        previewBgUrl = URL.createObjectURL(record.bgImageFile);
-        if(currentBgKind === 'video'){
-          previewBg.style.backgroundImage = '';
-          previewBgImageEl = null;
-          activateBgVideo(previewBgUrl);
-        } else {
-          previewBg.style.backgroundImage = 'url(' + previewBgUrl + ')';
-          loadPreviewBgImage(record.bgImageFile);
+  // Resolves which project should be active on page load: the remembered
+  // current project, a one-time migration of the old single-session record,
+  // or (for a first-ever visit) a fresh empty project.
+  function initProjects(){
+    return getCurrentProjectId().then(function(id){
+      if(!id) return null;
+      return getProject(id);
+    }).then(function(record){
+      if(record) return record;
+      return getLegacySession().then(function(legacy){
+        if(legacy){
+          const rawName = (legacy.lyricsFileName && legacy.lyricsFileName !== '未選択') ? legacy.lyricsFileName
+            : ((legacy.audioFileName && legacy.audioFileName !== '未選択') ? legacy.audioFileName : '以前の作業内容');
+          const migrated = {
+            id: genProjectId(),
+            name: rawName.replace(/\.[^.]+$/, ''),
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            audioFile: legacy.audioFile || null,
+            audioFileName: legacy.audioFileName || '未選択',
+            bgImageFile: legacy.bgImageFile || null,
+            bgKind: legacy.bgKind || null,
+            lyricsFileName: legacy.lyricsFileName || '未選択',
+            lyricsLines: legacy.lyricsLines || [],
+            uid: legacy.uid || 1,
+            previewSettings: legacy.previewSettings || null
+          };
+          return putProject(migrated).then(function(){ return deleteLegacySession(); }).then(function(){ return migrated; });
         }
-        previewBg.classList.add('has-image');
-        previewBgClearBtn.disabled = false;
-        restoredSomething = true;
-      }
-
-      if(record.previewSettings){
-        applyFullPreviewSettings(record.previewSettings);
-        restoredSomething = true;
-      }
-
-      sessionRestoring = false;
-      if(restoredSomething) setStatus('前回の作業内容を復元しました', 'ok');
+        return listProjects().then(function(existing){
+          if(existing.length) return existing.sort(function(a, b){ return (b.updatedAt || 0) - (a.updatedAt || 0); })[0];
+          const fresh = buildProjectRecord('プロジェクト1');
+          return putProject(fresh).then(function(){ return fresh; });
+        });
+      });
+    }).then(function(record){
+      return setCurrentProjectId(record.id).then(function(){
+        applyProjectRecord(record);
+        return refreshProjectList();
+      }).then(function(){
+        if(currentAudioFile || lyricsLines.length) setStatus('前回の作業内容を復元しました', 'ok');
+      });
     }).catch(function(err){
       sessionRestoring = false;
-      console.warn('[srt-maker] セッションの復元に失敗しました', err);
+      console.warn('[srt-maker] プロジェクトの初期化に失敗しました', err);
     });
   }
 
@@ -4965,7 +5294,8 @@
 
   /* ===================== init ===================== */
   renderTable();
-  restoreSessionState();
+  DEFAULT_PREVIEW_SETTINGS = getFullPreviewSettings();
+  initProjects();
 })();
 </script>
 </body>
