@@ -981,6 +981,12 @@
               </optgroup>
               <optgroup label="3D(WebGL)">
                 <option value="three3d">3Dバーシティ</option>
+                <option value="threewave">3Dウェーブグリッド</option>
+                <option value="threespike">3Dスパイクオーブ</option>
+                <option value="threegridbox">3Dグリッドボックス</option>
+                <option value="threespiketower">3Dスパイクタワー</option>
+                <option value="threeglitchcube">3Dグリッチキューブ</option>
+                <option value="threeparticleburst">3Dパーティクルバースト</option>
               </optgroup>
               <optgroup label="その他">
                 <option value="dots">ドット</option>
@@ -5486,6 +5492,1119 @@ export function createThreeEq(){
   return { canvas: canvas, update: update, dispose: dispose };
 }
 
+// Three.js-powered 3D wave-grid EQ: a grid of cubes on the XZ plane whose
+// per-column height is driven by the amplitude of that column's frequency
+// band (same per-pitch loudness data the other EQ styles use), while the
+// rows encode a short rolling history of that data pushed back in depth over
+// time - so a loud moment ripples in at the front row and visibly travels
+// backward into the distance as newer data arrives, reading as a traveling
+// wave across the grid rather than a static bar chart. Exposed the same way
+// as createThreeEq(): an (values, eqStyle, w, h) update() call driving an
+// offscreen canvas composited in via ctx.drawImage().
+export function createThreeWaveGrid(){
+  const COLS = 28, ROWS = 14;
+  const CELL = 0.46;
+  const MIN_H = 0.12, MAX_H = 3.6;
+  const ROW_INTERVAL_MS = 70;
+
+  const canvas = document.createElement('canvas');
+  const renderer = new THREE.WebGLRenderer({
+    canvas: canvas, alpha: true, antialias: true
+  });
+  renderer.setPixelRatio(1);
+  renderer.setClearColor(0x000000, 0);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x05070a, 0.05);
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+
+  const ambient = new THREE.AmbientLight(0xffffff, 0.65);
+  scene.add(ambient);
+  const light1 = new THREE.PointLight(0x7fe9db, 3, 40);
+  light1.position.set(5, 8, 6);
+  scene.add(light1);
+  const light2 = new THREE.PointLight(0x33d6c0, 2, 40);
+  light2.position.set(-6, 5, -4);
+  scene.add(light2);
+
+  const COUNT = COLS * ROWS;
+  const cubeGeo = new THREE.BoxGeometry(CELL * 0.72, 1, CELL * 0.72);
+  const cubeMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff, metalness: 0.3, roughness: 0.45,
+    emissive: 0x184a44, emissiveIntensity: 0.75
+  });
+  const mesh = new THREE.InstancedMesh(cubeGeo, cubeMat, COUNT);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  scene.add(mesh);
+
+  const baseGeo = new THREE.PlaneGeometry(COLS * CELL + 1.4, ROWS * CELL + 1.4);
+  const baseMat = new THREE.MeshStandardMaterial({ color: 0x090b0f, metalness: 0.15, roughness: 0.9 });
+  const base = new THREE.Mesh(baseGeo, baseMat);
+  base.rotation.x = -Math.PI / 2;
+  base.position.y = -0.02;
+  scene.add(base);
+
+  const dummy = new THREE.Object3D();
+  const heights = new Float32Array(COUNT);
+  const history = [];
+  for(let r = 0; r < ROWS; r++) history.push(new Float32Array(COLS));
+
+  let lastW = 0, lastH = 0;
+  let lastColorStart = null, lastColorEnd = null;
+  let lastShiftTime = performance.now();
+  const startTime = lastShiftTime;
+  const tmpColorA = new THREE.Color();
+  const tmpColorB = new THREE.Color();
+  const cellColor = new THREE.Color();
+  const WHITE = new THREE.Color(0xffffff);
+
+  function xOf(c){ return (c - (COLS - 1) / 2) * CELL; }
+  function zOf(r){ return (ROWS / 2 - r) * CELL; }
+
+  function resampleInto(row, values){
+    const n = values.length;
+    for(let c = 0; c < COLS; c++){
+      const srcIdx = Math.min(n - 1, Math.floor((c / COLS) * n));
+      row[c] = values[srcIdx];
+    }
+  }
+
+  function applyColors(colorStartHex, colorEndHex){
+    lastColorStart = colorStartHex; lastColorEnd = colorEndHex;
+    tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
+    light1.color.copy(tmpColorA);
+    light2.color.copy(tmpColorB);
+  }
+
+  function update(values, eqStyle, w, h){
+    if(w !== lastW || h !== lastH){
+      lastW = w; lastH = h;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / Math.max(1, h);
+      camera.updateProjectionMatrix();
+    }
+    if(eqStyle.colorStart !== lastColorStart || eqStyle.colorEnd !== lastColorEnd){
+      applyColors(eqStyle.colorStart, eqStyle.colorEnd);
+    }
+
+    const now = performance.now();
+    if(now - lastShiftTime >= ROW_INTERVAL_MS){
+      lastShiftTime = now;
+      const reused = history.pop();
+      history.unshift(reused);
+    }
+    resampleInto(history[0], values);
+
+    let frontSum = 0;
+    for(let r = 0; r < ROWS; r++){
+      const row = history[r];
+      const z = zOf(r);
+      const fade = 1 - (r / ROWS) * 0.55;
+      const smoothing = r === 0 ? 0.5 : 0.35;
+      for(let c = 0; c < COLS; c++){
+        const idx = r * COLS + c;
+        const v = row[c];
+        if(r === 0) frontSum += v;
+        const targetH = MIN_H + v * MAX_H;
+        heights[idx] += (targetH - heights[idx]) * smoothing;
+        const hgt = Math.max(MIN_H, heights[idx]);
+
+        dummy.position.set(xOf(c), hgt / 2, z);
+        dummy.scale.set(1, hgt, 1);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(idx, dummy.matrix);
+
+        const t = c / (COLS - 1 || 1);
+        cellColor.copy(tmpColorA).lerp(tmpColorB, t);
+        cellColor.lerp(WHITE, Math.min(0.55, v * 0.5));
+        cellColor.multiplyScalar(fade);
+        mesh.setColorAt(idx, cellColor);
+      }
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if(mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    cubeMat.emissiveIntensity = 0.4 + (frontSum / COLS) * 1.3;
+
+    const elapsed = (now - startTime) / 1000;
+    camera.position.set(Math.sin(elapsed * 0.08) * 1.6, 11.5 + Math.sin(elapsed * 0.25) * 0.4, 9.5);
+    camera.lookAt(0, -1, -1.5);
+
+    renderer.render(scene, camera);
+  }
+
+  function dispose(){
+    cubeGeo.dispose();
+    cubeMat.dispose();
+    baseGeo.dispose();
+    baseMat.dispose();
+    renderer.dispose();
+  }
+
+  return { canvas: canvas, update: update, dispose: dispose };
+}
+
+
+// Three.js-powered glowing "spike orb": a dense wireframe sphere whose
+// surface is displaced outward per-vertex by a blend of smooth 3D noise
+// (for the organic, irregular lobed silhouette) and the per-pitch loudness
+// at that vertex's longitude (mapping angle-around-the-sphere to a
+// frequency band, same idea as every other EQ style's per-bin mapping, just
+// wrapped around a globe instead of laid out in a row/ring of bars) - so the
+// bumps are not just decorative noise, they visibly swell where the music is
+// loud at that pitch. A soft inner glow shell sits just inside the wireframe
+// for the filled, luminous core seen in reference "audio-reactive plasma
+// orb" visuals; the outer soft halo comes for free from the app's existing
+// ctx.shadowBlur compositing (see drawEqThreeSpikeOrb / drawEq) so no
+// Three.js post-processing (bloom) is needed. Exposed the same way as the
+// other Three.js EQ styles: an (values, eqStyle, w, h) update() call driving
+// an offscreen canvas composited in via ctx.drawImage().
+
+// Compact 3D simplex noise (public-domain algorithm, Stefan Gustavson /
+// Ashima Arts), self-contained so the app stays a single file with no
+// network dependency for this either.
+function makeSimplex3(seed){
+  const grad3 = [
+    [1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],
+    [1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],
+    [0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1]
+  ];
+  const p = [];
+  let s = seed >>> 0 || 1;
+  function rand(){ s ^= s << 13; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }
+  for(let i = 0; i < 256; i++) p[i] = i;
+  for(let i = 255; i > 0; i--){
+    const j = Math.floor(rand() * (i + 1));
+    const tmp = p[i]; p[i] = p[j]; p[j] = tmp;
+  }
+  const perm = new Array(512), permMod12 = new Array(512);
+  for(let i = 0; i < 512; i++){ perm[i] = p[i & 255]; permMod12[i] = perm[i] % 12; }
+  const F3 = 1 / 3, G3 = 1 / 6;
+  return function(xin, yin, zin){
+    let n0, n1, n2, n3;
+    const s = (xin + yin + zin) * F3;
+    const i = Math.floor(xin + s), j = Math.floor(yin + s), k = Math.floor(zin + s);
+    const t = (i + j + k) * G3;
+    const X0 = i - t, Y0 = j - t, Z0 = k - t;
+    const x0 = xin - X0, y0 = yin - Y0, z0 = zin - Z0;
+    let i1, j1, k1, i2, j2, k2;
+    if(x0 >= y0){
+      if(y0 >= z0){ i1=1;j1=0;k1=0; i2=1;j2=1;k2=0; }
+      else if(x0 >= z0){ i1=1;j1=0;k1=0; i2=1;j2=0;k2=1; }
+      else { i1=0;j1=0;k1=1; i2=1;j2=0;k2=1; }
+    } else {
+      if(y0 < z0){ i1=0;j1=0;k1=1; i2=0;j2=1;k2=1; }
+      else if(x0 < z0){ i1=0;j1=1;k1=0; i2=0;j2=1;k2=1; }
+      else { i1=0;j1=1;k1=0; i2=1;j2=1;k2=0; }
+    }
+    const x1 = x0 - i1 + G3, y1 = y0 - j1 + G3, z1 = z0 - k1 + G3;
+    const x2 = x0 - i2 + 2*G3, y2 = y0 - j2 + 2*G3, z2 = z0 - k2 + 2*G3;
+    const x3 = x0 - 1 + 3*G3, y3 = y0 - 1 + 3*G3, z3 = z0 - 1 + 3*G3;
+    const ii = i & 255, jj = j & 255, kk = k & 255;
+    let t0 = 0.6 - x0*x0 - y0*y0 - z0*z0;
+    if(t0 < 0) n0 = 0; else { const gi0 = permMod12[ii+perm[jj+perm[kk]]]; t0*=t0; n0 = t0*t0*(grad3[gi0][0]*x0+grad3[gi0][1]*y0+grad3[gi0][2]*z0); }
+    let t1 = 0.6 - x1*x1 - y1*y1 - z1*z1;
+    if(t1 < 0) n1 = 0; else { const gi1 = permMod12[ii+i1+perm[jj+j1+perm[kk+k1]]]; t1*=t1; n1 = t1*t1*(grad3[gi1][0]*x1+grad3[gi1][1]*y1+grad3[gi1][2]*z1); }
+    let t2 = 0.6 - x2*x2 - y2*y2 - z2*z2;
+    if(t2 < 0) n2 = 0; else { const gi2 = permMod12[ii+i2+perm[jj+j2+perm[kk+k2]]]; t2*=t2; n2 = t2*t2*(grad3[gi2][0]*x2+grad3[gi2][1]*y2+grad3[gi2][2]*z2); }
+    let t3 = 0.6 - x3*x3 - y3*y3 - z3*z3;
+    if(t3 < 0) n3 = 0; else { const gi3 = permMod12[ii+1+perm[jj+1+perm[kk+1]]]; t3*=t3; n3 = t3*t3*(grad3[gi3][0]*x3+grad3[gi3][1]*y3+grad3[gi3][2]*z3); }
+    return 32 * (n0 + n1 + n2 + n3);
+  };
+}
+
+export function createThreeSpikeOrb(){
+  const RADIUS = 2.3;
+  const DETAIL = 4;
+  const noise = makeSimplex3(1337);
+
+  const canvas = document.createElement('canvas');
+  const renderer = new THREE.WebGLRenderer({
+    canvas: canvas, alpha: true, antialias: true
+  });
+  renderer.setPixelRatio(1);
+  renderer.setClearColor(0x000000, 0);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 100);
+
+  const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+  scene.add(ambient);
+  const light1 = new THREE.PointLight(0xffffff, 3.4, 40);
+  light1.position.set(5, 6, 7);
+  scene.add(light1);
+  const light2 = new THREE.PointLight(0x7fe9db, 2.4, 40);
+  light2.position.set(-6, -3, -5);
+  scene.add(light2);
+
+  const geo = new THREE.IcosahedronGeometry(RADIUS, DETAIL);
+  const posAttr = geo.attributes.position;
+  const vertexCount = posAttr.count;
+  // Base (undisplaced) unit directions, captured once - every frame we
+  // re-derive each vertex's position as dir * radius(dir, t) rather than
+  // accumulating drift onto the live (already-displaced) buffer.
+  const baseDirs = new Float32Array(vertexCount * 3);
+  for(let i = 0; i < vertexCount; i++){
+    const x = posAttr.getX(i), y = posAttr.getY(i), z = posAttr.getZ(i);
+    const len = Math.sqrt(x*x + y*y + z*z) || 1;
+    baseDirs[i*3] = x / len; baseDirs[i*3+1] = y / len; baseDirs[i*3+2] = z / len;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(vertexCount * 3), 3));
+
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xffffff, wireframe: true, transparent: true, opacity: 0.95,
+    vertexColors: true, metalness: 0.1, roughness: 0.35,
+    emissive: 0x1c3a38, emissiveIntensity: 0.5
+  });
+  const wireMesh = new THREE.Mesh(geo, mat);
+  scene.add(wireMesh);
+
+  // Soft filled core just inside the wireframe shell, additive-blended, for
+  // the luminous "lit from within" look instead of a hollow wire cage.
+  const coreGeo = new THREE.IcosahedronGeometry(RADIUS * 0.86, 3);
+  const coreMat = new THREE.MeshBasicMaterial({
+    color: 0xbfeee8, transparent: true, opacity: 0.16,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+  });
+  const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+  scene.add(coreMesh);
+
+  let lastW = 0, lastH = 0;
+  let lastColorStart = null, lastColorEnd = null;
+  const startTime = performance.now();
+  const tmpColorA = new THREE.Color();
+  const tmpColorB = new THREE.Color();
+  const cellColor = new THREE.Color();
+  const dir = new THREE.Vector3();
+  let smoothedLevel = 0;
+  let punch = 0;
+  let camAngleAccum = 0;
+  let lastElapsed = 0;
+
+  function applyColors(colorStartHex, colorEndHex){
+    lastColorStart = colorStartHex; lastColorEnd = colorEndHex;
+    tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
+    light2.color.copy(tmpColorB);
+    coreMat.color.copy(tmpColorA).lerp(new THREE.Color(0xffffff), 0.5);
+  }
+
+  function update(values, eqStyle, w, h){
+    if(w !== lastW || h !== lastH){
+      lastW = w; lastH = h;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / Math.max(1, h);
+      camera.updateProjectionMatrix();
+    }
+    if(eqStyle.colorStart !== lastColorStart || eqStyle.colorEnd !== lastColorEnd){
+      applyColors(eqStyle.colorStart, eqStyle.colorEnd);
+    }
+
+    const n = values.length;
+    let sum = 0, peak = 0;
+    for(let i = 0; i < n; i++){ sum += values[i]; if(values[i] > peak) peak = values[i]; }
+    const level = n ? sum / n : 0;
+    smoothedLevel += (level - smoothedLevel) * 0.35;
+    // Fast-attack / slow-decay transient envelope: jumps to a loud instant
+    // immediately, then eases back down, so kicks/snares punch the orb
+    // outward and let go, instead of every frame reading as similarly-sized.
+    punch = Math.max(peak, punch * 0.86);
+
+    const elapsed = (performance.now() - startTime) / 1000;
+    const colorAttr = geo.attributes.color;
+    for(let i = 0; i < vertexCount; i++){
+      const dx = baseDirs[i*3], dy = baseDirs[i*3+1], dz = baseDirs[i*3+2];
+
+      // Slow, large-scale organic lobes plus a faster, finer ripple layered
+      // on top - two octaves of the same noise field at different
+      // frequencies/speeds, which is what gives the surface its irregular,
+      // "alive" look rather than a uniform pulsing ball.
+      const nBig = noise(dx * 1.1 + elapsed * 0.12, dy * 1.1 + elapsed * 0.10, dz * 1.1);
+      const nFine = noise(dx * 3.4 - elapsed * 0.35, dy * 3.4, dz * 3.4 + elapsed * 0.28);
+      const organic = nBig * 0.65 + nFine * 0.35;
+
+      // Per-pitch reactivity: this vertex's longitude around the Y axis maps
+      // to a frequency bar, same as a bar EQ wrapped around a sphere, so
+      // loud pitches visibly swell that meridian slice of the orb.
+      const longitude = (Math.atan2(dz, dx) + Math.PI) / (Math.PI * 2);
+      const barIdx = Math.min(n - 1, Math.floor(longitude * n));
+      const bandLevel = n ? values[barIdx] : 0;
+
+      const rawBump = organic * (0.14 + smoothedLevel * 0.6 + punch * 0.35)
+        + bandLevel * 0.75 * (0.35 + Math.abs(nFine) * 0.65);
+      const bump = Math.max(-0.35, Math.min(0.85, rawBump));
+      const radius = RADIUS * (1 + bump);
+
+      posAttr.setXYZ(i, dx * radius, dy * radius, dz * radius);
+
+      const highlight = Math.max(0, Math.min(1, bump * 1.6 + bandLevel * 0.3));
+      cellColor.copy(tmpColorA).lerp(tmpColorB, dir.set(dx, dy, dz).y * 0.5 + 0.5);
+      cellColor.lerp(new THREE.Color(0xffffff), highlight * 0.6);
+      colorAttr.setXYZ(i, cellColor.r, cellColor.g, cellColor.b);
+    }
+    posAttr.needsUpdate = true;
+    colorAttr.needsUpdate = true;
+    geo.computeVertexNormals();
+
+    mat.emissiveIntensity = 0.4 + smoothedLevel * 1.1 + punch * 0.6;
+    coreMesh.scale.setScalar(1 + smoothedLevel * 0.12 + punch * 0.1);
+    coreMat.opacity = 0.12 + smoothedLevel * 0.22 + punch * 0.15;
+
+    // Random-feeling orbit: angular velocity and elevation wander via noise
+    // instead of advancing at a constant rate, so the camera speeds up,
+    // slows, pauses and reverses unpredictably while still moving
+    // perfectly smoothly (no jump-cuts) around the orb.
+    const dt = Math.max(0, Math.min(0.1, elapsed - lastElapsed));
+    lastElapsed = elapsed;
+    const angVel = noise(elapsed * 0.05, 12.3, 0) * 0.55;
+    camAngleAccum += angVel * dt;
+    const elevWander = noise(elapsed * 0.045, -8.1, 0);
+    const camRadius = 12;
+    camera.position.x = Math.sin(camAngleAccum) * camRadius;
+    camera.position.z = Math.cos(camAngleAccum) * camRadius;
+    camera.position.y = elevWander * camRadius * 0.3;
+    camera.lookAt(0, 0, 0);
+    wireMesh.rotation.y = elapsed * 0.05;
+    coreMesh.rotation.y = -elapsed * 0.03;
+
+    renderer.render(scene, camera);
+  }
+
+  function dispose(){
+    geo.dispose();
+    mat.dispose();
+    coreGeo.dispose();
+    coreMat.dispose();
+    renderer.dispose();
+  }
+
+  return { canvas: canvas, update: update, dispose: dispose };
+}
+
+// Three.js-powered "grid box" sound-visualizer EQ: a dense waterfall of
+// thin needle bars - one per frequency band, same per-pitch loudness data
+// every other EQ style uses - rising off the floor of an open wireframe box
+// corner (floor + back wall + side wall, like graph paper), with new data
+// arriving at a fixed cadence and flowing back across the floor over time.
+// The whole box slowly turns so all three grid faces are visible in turn.
+// Exposed the same way as the other Three.js EQ styles: an
+// (values, eqStyle, w, h) update() call driving an offscreen canvas
+// composited in via ctx.drawImage().
+export function createThreeGridBox(){
+  const COLS = 40, ROWS = 18;
+  const CELL = 0.22;
+  const MIN_H = 0.05, MAX_H = 3.4;
+  const ROW_INTERVAL_MS = 100;
+  const SIZE_X = COLS * CELL;
+  const SIZE_Z = ROWS * CELL;
+  const WALL_H = 4.2;
+
+  const canvas = document.createElement('canvas');
+  const renderer = new THREE.WebGLRenderer({
+    canvas: canvas, alpha: true, antialias: true
+  });
+  renderer.setPixelRatio(1);
+  renderer.setClearColor(0x000000, 0);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+
+  const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+  scene.add(ambient);
+  const light1 = new THREE.PointLight(0x7fe9ff, 3, 40);
+  light1.position.set(4, 6, 6);
+  scene.add(light1);
+  const light2 = new THREE.PointLight(0xff5fd6, 2.4, 40);
+  light2.position.set(-3, 3, -4);
+  scene.add(light2);
+
+  // Everything (reference grid box + the reactive needle grid) lives in one
+  // content group so a single slow rotation shows all three grid faces over
+  // time; that content group is itself offset inside an outer pivot group so
+  // the rotation axis passes through the box's visual center rather than its
+  // corner - otherwise the whole box swings off-center as it spins.
+  const group = new THREE.Group();
+  scene.add(group);
+  const content = new THREE.Group();
+  content.position.set(-SIZE_X / 2, -WALL_H * 0.32, SIZE_Z / 2);
+  group.add(content);
+
+  // ---- Static reference grid box (floor + back wall + side wall), all
+  // sharing one common vertical corner edge at local (0,0,0)-(0,WALL_H,0).
+  const GRID_LINE_A = 0x2c4a52;
+  const gridGeos = [], gridMats = [];
+  function makeGrid(sizeA, sizeB, divA, divB){
+    // THREE.GridHelper is always square (size, divisions) lying flat in XZ;
+    // build a plain rectangular grid instead so floor/back/side can have
+    // independent aspect ratios that match the needle grid's COLS/ROWS.
+    const mat = new THREE.LineBasicMaterial({ color: GRID_LINE_A, transparent: true, opacity: 0.55 });
+    const pts = [];
+    for(let i = 0; i <= divA; i++){
+      const a = (i / divA) * sizeA;
+      pts.push(new THREE.Vector3(a, 0, 0), new THREE.Vector3(a, 0, sizeB));
+    }
+    for(let j = 0; j <= divB; j++){
+      const b = (j / divB) * sizeB;
+      pts.push(new THREE.Vector3(0, 0, b), new THREE.Vector3(sizeA, 0, b));
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    gridGeos.push(geo); gridMats.push(mat);
+    return new THREE.LineSegments(geo, mat);
+  }
+
+  const floor = makeGrid(SIZE_X, SIZE_Z, COLS, ROWS);
+  floor.position.set(0, 0, -SIZE_Z);
+  content.add(floor);
+
+  const backWall = makeGrid(SIZE_X, WALL_H, COLS, 16);
+  backWall.rotation.x = -Math.PI / 2;
+  content.add(backWall);
+
+  const sideWall = makeGrid(SIZE_Z, WALL_H, ROWS, 16);
+  sideWall.rotation.x = -Math.PI / 2;
+  sideWall.rotation.z = Math.PI / 2;
+  sideWall.position.set(0, 0, 0);
+  content.add(sideWall);
+
+  // ---- Reactive needle grid: one thin bar per (frequency column, history
+  // row), rising from the floor just in front of the back wall.
+  const COUNT = COLS * ROWS;
+  const needleGeo = new THREE.BoxGeometry(CELL * 0.3, 1, CELL * 0.3);
+  const needleMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff, metalness: 0.2, roughness: 0.4,
+    emissive: 0x14324a, emissiveIntensity: 0.7
+  });
+  const mesh = new THREE.InstancedMesh(needleGeo, needleMat, COUNT);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  content.add(mesh);
+
+  const dummy = new THREE.Object3D();
+  const heights = new Float32Array(COUNT);
+  const history = [];
+  for(let r = 0; r < ROWS; r++) history.push(new Float32Array(COLS));
+
+  let lastW = 0, lastH = 0;
+  let lastColorStart = null, lastColorEnd = null;
+  let lastShiftTime = performance.now();
+  const startTime = lastShiftTime;
+  const tmpColorA = new THREE.Color();
+  const tmpColorB = new THREE.Color();
+  const cellColor = new THREE.Color();
+  const WHITE = new THREE.Color(0xffffff);
+
+  function xOf(c){ return (c + 0.5) * CELL; }
+  function zOf(r){ return -(r + 0.5) * CELL; }
+
+  function resampleInto(row, values){
+    const n = values.length;
+    for(let c = 0; c < COLS; c++){
+      const srcIdx = Math.min(n - 1, Math.floor((c / COLS) * n));
+      row[c] = values[srcIdx];
+    }
+  }
+
+  function applyColors(colorStartHex, colorEndHex){
+    lastColorStart = colorStartHex; lastColorEnd = colorEndHex;
+    tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
+    light1.color.copy(tmpColorA);
+    light2.color.copy(tmpColorB);
+  }
+
+  function update(values, eqStyle, w, h){
+    if(w !== lastW || h !== lastH){
+      lastW = w; lastH = h;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / Math.max(1, h);
+      camera.updateProjectionMatrix();
+    }
+    if(eqStyle.colorStart !== lastColorStart || eqStyle.colorEnd !== lastColorEnd){
+      applyColors(eqStyle.colorStart, eqStyle.colorEnd);
+    }
+
+    const now = performance.now();
+    if(now - lastShiftTime >= ROW_INTERVAL_MS){
+      lastShiftTime = now;
+      const reused = history.pop();
+      history.unshift(reused);
+    }
+    resampleInto(history[0], values);
+
+    let frontSum = 0;
+    for(let r = 0; r < ROWS; r++){
+      const row = history[r];
+      const z = zOf(r);
+      const fade = 1 - (r / ROWS) * 0.6;
+      const smoothing = r === 0 ? 0.55 : 0.4;
+      for(let c = 0; c < COLS; c++){
+        const idx = r * COLS + c;
+        const v = row[c];
+        if(r === 0) frontSum += v;
+        const targetH = MIN_H + v * MAX_H;
+        heights[idx] += (targetH - heights[idx]) * smoothing;
+        const hgt = Math.max(MIN_H, heights[idx]);
+
+        dummy.position.set(xOf(c), hgt / 2, z);
+        dummy.scale.set(1, hgt, 1);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(idx, dummy.matrix);
+
+        const t = c / (COLS - 1 || 1);
+        cellColor.copy(tmpColorA).lerp(tmpColorB, t);
+        cellColor.lerp(WHITE, Math.min(0.6, v * 0.55));
+        cellColor.multiplyScalar(fade);
+        mesh.setColorAt(idx, cellColor);
+      }
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if(mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    needleMat.emissiveIntensity = 0.5 + (frontSum / COLS) * 1.2;
+
+    const elapsed = (now - startTime) / 1000;
+    group.rotation.y = elapsed * 0.18;
+
+    camera.position.set(0, 3.6, 10.8);
+    camera.lookAt(0, 0, 0);
+
+    renderer.render(scene, camera);
+  }
+
+  function dispose(){
+    needleGeo.dispose();
+    needleMat.dispose();
+    gridGeos.forEach(function(g){ g.dispose(); });
+    gridMats.forEach(function(m){ m.dispose(); });
+    renderer.dispose();
+  }
+
+  return { canvas: canvas, update: update, dispose: dispose };
+}
+
+// Three.js-powered "spike tower" EQ: two concentric rings of countless
+// sharp, narrow pyramid-spikes (one per position, mapped to a frequency
+// band the same way every other EQ style maps bars/cubes to bins) that
+// thrust upward independently on fast-attack/slow-decay per-spike envelopes,
+// so transients read as a staccato, glitchy volley of spikes popping up
+// rather than a uniform wave - the "edgy, addictive" high-energy read the
+// style is going for. A wandering (noise-driven, never constant-rate)
+// camera orbit plus a transient-driven FOV/emissive "kick" on every beat
+// add extra punch. Exposed the same way as the other Three.js EQ styles:
+// an (values, eqStyle, w, h) update() call driving an offscreen canvas
+// composited in via ctx.drawImage().
+export function createThreeSpikeTower(){
+  const RINGS = [
+    { radius: 2.3, count: 44 },
+    { radius: 3.7, count: 64 }
+  ];
+  const N = RINGS.reduce(function(sum, r){ return sum + r.count; }, 0);
+  const MIN_H = 0.1, MAX_H = 2.9;
+  const BASE_FOV = 44;
+  const noise = makeSimplex3(4242);
+
+  const canvas = document.createElement('canvas');
+  const renderer = new THREE.WebGLRenderer({
+    canvas: canvas, alpha: true, antialias: true
+  });
+  renderer.setPixelRatio(1);
+  renderer.setClearColor(0x000000, 0);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, 100);
+
+  const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+  scene.add(ambient);
+  const light1 = new THREE.PointLight(0xffffff, 4, 40);
+  light1.position.set(4, 7, 5);
+  scene.add(light1);
+  const light2 = new THREE.PointLight(0xff2d95, 2.6, 40);
+  light2.position.set(-5, 2, -4);
+  scene.add(light2);
+
+  // Sharp, low-poly (4-sided) needle - a real cone would look smooth/soft;
+  // a 4-gon pyramid is what actually reads as "edgy" at this scale.
+  const spikeGeo = new THREE.ConeGeometry(0.16, 1, 4);
+  const spikeMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff, metalness: 0.25, roughness: 0.3,
+    emissive: 0x2a1030, emissiveIntensity: 0.7, vertexColors: true
+  });
+  const mesh = new THREE.InstancedMesh(spikeGeo, spikeMat, N);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
+  scene.add(mesh);
+
+  const positions = new Float32Array(N * 2); // x, z per spike
+  const angles = new Float32Array(N);
+  let cursor = 0;
+  RINGS.forEach(function(ring){
+    for(let i = 0; i < ring.count; i++){
+      const angle = (i / ring.count) * Math.PI * 2 + (ring.radius * 0.7);
+      positions[cursor * 2] = Math.cos(angle) * ring.radius;
+      positions[cursor * 2 + 1] = Math.sin(angle) * ring.radius;
+      angles[cursor] = angle;
+      cursor++;
+    }
+  });
+
+  const maxRadius = RINGS[RINGS.length - 1].radius + 0.6;
+  const baseGeo = new THREE.CylinderGeometry(maxRadius, maxRadius, 0.1, 56);
+  const baseMat = new THREE.MeshStandardMaterial({ color: 0x0a0710, metalness: 0.3, roughness: 0.75 });
+  const base = new THREE.Mesh(baseGeo, baseMat);
+  base.position.y = -0.06;
+  scene.add(base);
+
+  const dummy = new THREE.Object3D();
+  const heights = new Float32Array(N);
+  const spikePunch = new Float32Array(N);
+  let globalPunch = 0;
+  let lastW = 0, lastH = 0;
+  let lastColorStart = null, lastColorEnd = null;
+  const startTime = performance.now();
+  let lastElapsed = 0;
+  let camAngleAccum = 0;
+  const tmpColorA = new THREE.Color();
+  const tmpColorB = new THREE.Color();
+  const cellColor = new THREE.Color();
+  const WHITE = new THREE.Color(0xffffff);
+
+  function applyColors(colorStartHex, colorEndHex){
+    lastColorStart = colorStartHex; lastColorEnd = colorEndHex;
+    tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
+    light1.color.copy(tmpColorA).lerp(WHITE, 0.6);
+    light2.color.copy(tmpColorB);
+  }
+
+  function update(values, eqStyle, w, h){
+    if(w !== lastW || h !== lastH){
+      lastW = w; lastH = h;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / Math.max(1, h);
+      camera.updateProjectionMatrix();
+    }
+    if(eqStyle.colorStart !== lastColorStart || eqStyle.colorEnd !== lastColorEnd){
+      applyColors(eqStyle.colorStart, eqStyle.colorEnd);
+    }
+
+    const n = values.length;
+    const elapsed = (performance.now() - startTime) / 1000;
+    let peakAll = 0;
+
+    for(let i = 0; i < N; i++){
+      const barIdx = Math.min(n - 1, Math.floor((i / N) * n));
+      const v = n ? values[barIdx] : 0;
+      if(v > peakAll) peakAll = v;
+
+      // Fast-attack, faster-decay per-spike envelope: each spike pops on
+      // its own transient rather than the whole field breathing in unison,
+      // which is what gives the staccato/glitchy "addictive" read.
+      spikePunch[i] = Math.max(v, spikePunch[i] * 0.78);
+
+      const jitter = noise(angles[i] * 2, elapsed * 0.6, i * 0.01) * 0.06;
+      const targetH = MIN_H + Math.max(0, spikePunch[i] + jitter) * MAX_H;
+      const rising = targetH > heights[i];
+      heights[i] += (targetH - heights[i]) * (rising ? 0.65 : 0.22);
+      const hgt = Math.max(MIN_H, heights[i]);
+
+      dummy.position.set(positions[i * 2], hgt / 2, positions[i * 2 + 1]);
+      dummy.rotation.set(0, angles[i], 0);
+      dummy.scale.set(1, hgt, 1);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+
+      const heat = Math.min(1, spikePunch[i] * 1.3);
+      cellColor.copy(tmpColorA).lerp(tmpColorB, i / (N - 1));
+      cellColor.lerp(WHITE, heat * 0.7);
+      mesh.setColorAt(i, cellColor);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if(mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+
+    globalPunch = Math.max(peakAll, globalPunch * 0.82);
+    spikeMat.emissiveIntensity = 0.55 + globalPunch * 1.4;
+
+    // Beat "kick": a brief FOV punch-in plus a light-intensity flash on
+    // transients, on top of the constantly-wandering orbit.
+    camera.fov = BASE_FOV - globalPunch * 5.5;
+    camera.updateProjectionMatrix();
+    light1.intensity = 3 + globalPunch * 5;
+
+    const dt = Math.max(0, Math.min(0.1, elapsed - lastElapsed));
+    lastElapsed = elapsed;
+    const angVel = 0.16 + noise(elapsed * 0.05, 30.1, 0) * 0.22;
+    camAngleAccum += angVel * dt;
+    const camDist = 10.5 - globalPunch * 0.8;
+    const elev = 4.6 + noise(elapsed * 0.04, -20.4, 0) * 1.1;
+    camera.position.set(Math.sin(camAngleAccum) * camDist, elev, Math.cos(camAngleAccum) * camDist);
+    camera.lookAt(0, 0.6, 0);
+
+    renderer.render(scene, camera);
+  }
+
+  function dispose(){
+    spikeGeo.dispose();
+    spikeMat.dispose();
+    baseGeo.dispose();
+    baseMat.dispose();
+    renderer.dispose();
+  }
+
+  return { canvas: canvas, update: update, dispose: dispose };
+}
+
+// Three.js-powered "glitch cube chaos" EQ: a quiet 7x7x7 volumetric block
+// of cubes that mostly just sits there - until a frequency band it's
+// assigned to (spatial assignment scrambled by a hash, not banded, for a
+// non-obviously-organized "chaos" look) has a musical onset, at which point
+// that cube violently jumps to a random nearby offset, spins to a random
+// orientation and flashes white, then eases back to its resting grid slot -
+// reading as the block being glitched/corrupted by the music rather than a
+// smooth reactive surface. Exposed the same way as the other Three.js EQ
+// styles: an (values, eqStyle, w, h) update() call driving an offscreen
+// canvas composited in via ctx.drawImage().
+export function createThreeGlitchCube(){
+  const DIM = 7;
+  const N = DIM * DIM * DIM;
+  const SPACING = 0.62;
+  const CUBE_SIZE = 0.4;
+  const noise = makeSimplex3(9911);
+
+  const canvas = document.createElement('canvas');
+  const renderer = new THREE.WebGLRenderer({
+    canvas: canvas, alpha: true, antialias: true
+  });
+  renderer.setPixelRatio(1);
+  renderer.setClearColor(0x000000, 0);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
+
+  const ambient = new THREE.AmbientLight(0xffffff, 0.95);
+  scene.add(ambient);
+  const light1 = new THREE.PointLight(0xffffff, 5.5, 40);
+  light1.position.set(5, 6, 6);
+  scene.add(light1);
+  const light2 = new THREE.PointLight(0x33d6ff, 4, 40);
+  light2.position.set(-6, -4, -5);
+  scene.add(light2);
+
+  const group = new THREE.Group();
+  scene.add(group);
+
+  const cubeGeo = new THREE.BoxGeometry(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE);
+  const cubeMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff, metalness: 0.2, roughness: 0.4,
+    emissive: 0x1c3550, emissiveIntensity: 0.85, vertexColors: true
+  });
+  const mesh = new THREE.InstancedMesh(cubeGeo, cubeMat, N);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
+  group.add(mesh);
+
+  const half = (DIM - 1) / 2;
+  const basePos = new Float32Array(N * 3);
+  const binOf = new Int32Array(N);
+  let idx = 0;
+  for(let x = 0; x < DIM; x++){
+    for(let y = 0; y < DIM; y++){
+      for(let z = 0; z < DIM; z++){
+        basePos[idx*3] = (x - half) * SPACING;
+        basePos[idx*3+1] = (y - half) * SPACING;
+        basePos[idx*3+2] = (z - half) * SPACING;
+        // Deterministic pseudo-random spatial scramble so frequency
+        // response isn't visually banded by axis - reinforces "chaos".
+        const h = Math.sin(idx * 12.9898) * 43758.5453;
+        binOf[idx] = Math.abs(Math.floor((h - Math.floor(h)) * 997));
+        idx++;
+      }
+    }
+  }
+
+  const dummy = new THREE.Object3D();
+  const prevVal = new Float32Array(N);
+  const glitchT = new Float32Array(N);     // seconds remaining in the current glitch burst
+  const glitchDur = new Float32Array(N);   // total duration of the current burst (for easing)
+  const offX = new Float32Array(N), offY = new Float32Array(N), offZ = new Float32Array(N);
+  const rotX = new Float32Array(N), rotY = new Float32Array(N), rotZ = new Float32Array(N);
+
+  let lastW = 0, lastH = 0;
+  let lastColorStart = null, lastColorEnd = null;
+  const startTime = performance.now();
+  let lastElapsed = 0;
+  let camAngleAccum = 0;
+  let globalPunch = 0;
+  const tmpColorA = new THREE.Color();
+  const tmpColorB = new THREE.Color();
+  const cellColor = new THREE.Color();
+  const WHITE = new THREE.Color(0xffffff);
+
+  function applyColors(colorStartHex, colorEndHex){
+    lastColorStart = colorStartHex; lastColorEnd = colorEndHex;
+    tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
+    light1.color.copy(tmpColorA).lerp(WHITE, 0.5);
+    light2.color.copy(tmpColorB);
+  }
+
+  function update(values, eqStyle, w, h){
+    if(w !== lastW || h !== lastH){
+      lastW = w; lastH = h;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / Math.max(1, h);
+      camera.updateProjectionMatrix();
+    }
+    if(eqStyle.colorStart !== lastColorStart || eqStyle.colorEnd !== lastColorEnd){
+      applyColors(eqStyle.colorStart, eqStyle.colorEnd);
+    }
+
+    const n = values.length;
+    const elapsed = (performance.now() - startTime) / 1000;
+    const dt = Math.max(0, Math.min(0.1, elapsed - lastElapsed));
+    lastElapsed = elapsed;
+    let peakAll = 0;
+
+    for(let i = 0; i < N; i++){
+      const barIdx = n ? binOf[i] % n : 0;
+      const v = n ? values[barIdx] : 0;
+      if(v > peakAll) peakAll = v;
+
+      // Onset detection per cube: a sudden rise (not just "loud") triggers
+      // a fresh glitch burst, so this reacts to musical hits, not sustain.
+      if(glitchT[i] <= 0 && v > prevVal[i] + 0.16 && v > 0.28){
+        const dur = 0.12 + Math.random() * 0.16;
+        glitchT[i] = dur;
+        glitchDur[i] = dur;
+        const amt = (0.6 + v * 1.8) * SPACING;
+        offX[i] = (Math.random() * 2 - 1) * amt;
+        offY[i] = (Math.random() * 2 - 1) * amt;
+        offZ[i] = (Math.random() * 2 - 1) * amt;
+        rotX[i] = Math.random() * Math.PI * 2;
+        rotY[i] = Math.random() * Math.PI * 2;
+        rotZ[i] = Math.random() * Math.PI * 2;
+      }
+      prevVal[i] = v;
+
+      let px = basePos[i*3], py = basePos[i*3+1], pz = basePos[i*3+2];
+      let rx = 0, ry = 0, rz = 0, flash = 0, scale = 1;
+      if(glitchT[i] > 0){
+        glitchT[i] -= dt;
+        const t = Math.max(0, glitchT[i] / glitchDur[i]); // 1 -> 0 over the burst
+        const ease = t * t;
+        px += offX[i] * ease; py += offY[i] * ease; pz += offZ[i] * ease;
+        rx = rotX[i] * ease; ry = rotY[i] * ease; rz = rotZ[i] * ease;
+        flash = ease;
+        scale = 1 + ease * 0.8;
+      }
+
+      dummy.position.set(px, py, pz);
+      dummy.rotation.set(rx, ry, rz);
+      dummy.scale.setScalar(scale);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+
+      const t2 = i / (N - 1);
+      cellColor.copy(tmpColorA).lerp(tmpColorB, t2);
+      cellColor.lerp(WHITE, 0.25 + flash * 0.75);
+      mesh.setColorAt(i, cellColor);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if(mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+
+    globalPunch = Math.max(peakAll, globalPunch * 0.85);
+    cubeMat.emissiveIntensity = 0.45 + globalPunch * 1.1;
+    light1.intensity = 3 + globalPunch * 4.5;
+
+    group.rotation.y = elapsed * 0.12 + Math.sin(elapsed * 0.31) * 0.08;
+    group.rotation.x = Math.sin(elapsed * 0.17) * 0.08;
+
+    const angVel = 0.1 + noise(elapsed * 0.04, 71.2, 0) * 0.1;
+    camAngleAccum += angVel * dt;
+    const camDist = 8.2 - globalPunch * 0.5;
+    camera.position.set(Math.sin(camAngleAccum) * camDist, 2.4 + Math.sin(elapsed * 0.13) * 0.6, Math.cos(camAngleAccum) * camDist);
+    camera.lookAt(0, 0, 0);
+
+    renderer.render(scene, camera);
+  }
+
+  function dispose(){
+    cubeGeo.dispose();
+    cubeMat.dispose();
+    renderer.dispose();
+  }
+
+  return { canvas: canvas, update: update, dispose: dispose };
+}
+
+// Three.js-powered "particle burst ring" EQ: a pool of thousands of glowing
+// particles fired outward from the center whenever a frequency band has a
+// musical onset (same fast-attack onset detection as the other "edgy" EQ
+// styles), each particle flying out along a random direction and fading as
+// it travels - so loud, percussive moments read as fireworks-style bursts
+// rather than a smooth pulsing shape. A soft radial-gradient sprite (drawn
+// once to an offscreen 2D canvas at startup) gives each particle a glow
+// without needing an external texture asset or post-processing bloom.
+// Exposed the same way as the other Three.js EQ styles: an
+// (values, eqStyle, w, h) update() call driving an offscreen canvas
+// composited in via ctx.drawImage().
+export function createThreeParticleBurst(){
+  const POOL = 2600;
+  const LIFESPAN = 1.15;
+  const MAX_RANGE = 6.5;
+
+  function makeSpriteTexture(){
+    const size = 64;
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const cx = c.getContext('2d');
+    const grad = cx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.35, 'rgba(255,255,255,0.85)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    cx.fillStyle = grad;
+    cx.fillRect(0, 0, size, size);
+    const tex = new THREE.CanvasTexture(c);
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  const canvas = document.createElement('canvas');
+  const renderer = new THREE.WebGLRenderer({
+    canvas: canvas, alpha: true, antialias: true
+  });
+  renderer.setPixelRatio(1);
+  renderer.setClearColor(0x000000, 0);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(48, 1, 0.1, 100);
+  camera.position.set(0, 0, 9);
+
+  const geo = new THREE.BufferGeometry();
+  const posArr = new Float32Array(POOL * 3);
+  const colorArr = new Float32Array(POOL * 3);
+  geo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(colorArr, 3));
+
+  const sprite = makeSpriteTexture();
+  const mat = new THREE.PointsMaterial({
+    size: 0.16, map: sprite, transparent: true, depthWrite: false,
+    vertexColors: true, blending: THREE.AdditiveBlending, sizeAttenuation: true
+  });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+
+  const dirX = new Float32Array(POOL), dirY = new Float32Array(POOL), dirZ = new Float32Array(POOL);
+  const age = new Float32Array(POOL).fill(LIFESPAN + 1); // start "dead"
+  const speed = new Float32Array(POOL);
+  const binOf = new Int32Array(POOL);
+  const partColorR = new Float32Array(POOL), partColorG = new Float32Array(POOL), partColorB = new Float32Array(POOL);
+  for(let i = 0; i < POOL; i++){
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(Math.random() * 2 - 1);
+    dirX[i] = Math.sin(phi) * Math.cos(theta);
+    dirY[i] = Math.sin(phi) * Math.sin(theta);
+    dirZ[i] = Math.cos(phi);
+    binOf[i] = i; // reassigned modulo n each frame below
+  }
+  let nextSpawn = 0;
+
+  const prevVal = new Float32Array(256);
+  let lastW = 0, lastH = 0;
+  let lastColorStart = null, lastColorEnd = null;
+  const startTime = performance.now();
+  let lastElapsed = 0;
+  let camAngleAccum = 0;
+  const tmpColorA = new THREE.Color();
+  const tmpColorB = new THREE.Color();
+  const cellColor = new THREE.Color();
+  const WHITE = new THREE.Color(0xffffff);
+
+  function applyColors(colorStartHex, colorEndHex){
+    lastColorStart = colorStartHex; lastColorEnd = colorEndHex;
+    tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
+  }
+
+  function spawnBurst(bin, n, count, strength){
+    for(let k = 0; k < count; k++){
+      const i = nextSpawn;
+      nextSpawn = (nextSpawn + 1) % POOL;
+      age[i] = 0;
+      speed[i] = (2.2 + Math.random() * 2.4) * (0.5 + strength);
+      const t = n ? bin / n : 0;
+      cellColor.copy(tmpColorA).lerp(tmpColorB, t).lerp(WHITE, Math.min(0.5, strength * 0.5));
+      partColorR[i] = cellColor.r; partColorG[i] = cellColor.g; partColorB[i] = cellColor.b;
+    }
+  }
+
+  function update(values, eqStyle, w, h){
+    if(w !== lastW || h !== lastH){
+      lastW = w; lastH = h;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / Math.max(1, h);
+      camera.updateProjectionMatrix();
+    }
+    if(eqStyle.colorStart !== lastColorStart || eqStyle.colorEnd !== lastColorEnd){
+      applyColors(eqStyle.colorStart, eqStyle.colorEnd);
+    }
+
+    const n = values.length;
+    const elapsed = (performance.now() - startTime) / 1000;
+    const dt = Math.max(0, Math.min(0.1, elapsed - lastElapsed));
+    lastElapsed = elapsed;
+
+    // Onset detection per frequency band -> a burst of fresh particles
+    // fired for that band; a low-level continuous trickle keeps the ring
+    // from ever looking completely dead during quiet passages.
+    for(let b = 0; b < n; b++){
+      const v = values[b];
+      if(v > prevVal[b] + 0.14 && v > 0.22){
+        spawnBurst(b, n, Math.round(14 + v * 40), v);
+      }
+      prevVal[b] = v;
+    }
+    if(Math.random() < 0.6){
+      spawnBurst(Math.floor(Math.random() * Math.max(1, n)), n, 2, 0.15);
+    }
+
+    for(let i = 0; i < POOL; i++){
+      age[i] += dt;
+      if(age[i] >= LIFESPAN){
+        posArr[i*3] = posArr[i*3+1] = posArr[i*3+2] = 0;
+        colorArr[i*3] = colorArr[i*3+1] = colorArr[i*3+2] = 0;
+        continue;
+      }
+      const tNorm = age[i] / LIFESPAN;
+      const eased = 1 - Math.pow(1 - tNorm, 3); // easeOutCubic
+      const r = eased * speed[i] * (MAX_RANGE / 4.6);
+      posArr[i*3] = dirX[i] * r;
+      posArr[i*3+1] = dirY[i] * r;
+      posArr[i*3+2] = dirZ[i] * r;
+      const fade = 1 - tNorm;
+      colorArr[i*3] = partColorR[i] * fade;
+      colorArr[i*3+1] = partColorG[i] * fade;
+      colorArr[i*3+2] = partColorB[i] * fade;
+    }
+    geo.attributes.position.needsUpdate = true;
+    geo.attributes.color.needsUpdate = true;
+
+    const angVel = 0.06 + Math.sin(elapsed * 0.09) * 0.05;
+    camAngleAccum += angVel * dt;
+    const camDist = 9;
+    camera.position.set(Math.sin(camAngleAccum) * camDist * 0.35, Math.sin(elapsed * 0.07) * 1.2, camDist);
+    camera.lookAt(0, 0, 0);
+    points.rotation.y = elapsed * 0.05;
+
+    renderer.render(scene, camera);
+  }
+
+  function dispose(){
+    geo.dispose();
+    mat.dispose();
+    sprite.dispose();
+    renderer.dispose();
+  }
+
+  return { canvas: canvas, update: update, dispose: dispose };
+}
 </script>
 <script>
 (function(){
@@ -6185,7 +7304,7 @@ export function createThreeEq(){
   let eqEnabled = false;
   let eqRAF = null;
 
-  const EQ_TYPES = ['bars', 'mirror', 'wave', 'circular', 'dots', 'led', 'radialDots', 'polygon', 'rays', 'ripple', 'particles', 'orb', 'smoothline', 'auraring', 'neongrid', 'liquidblob', 'vumeter', 'ringpulse', 'petalring', 'glitchblocks', 'plexus', 'ribbonwave', 'flowglow', 'flamebars', 'gradientwave', 'tunnel3d', 'rainbowcorona', 'three3d', 'oscilloscope'];
+  const EQ_TYPES = ['bars', 'mirror', 'wave', 'circular', 'dots', 'led', 'radialDots', 'polygon', 'rays', 'ripple', 'particles', 'orb', 'smoothline', 'auraring', 'neongrid', 'liquidblob', 'vumeter', 'ringpulse', 'petalring', 'glitchblocks', 'plexus', 'ribbonwave', 'flowglow', 'flamebars', 'gradientwave', 'tunnel3d', 'rainbowcorona', 'three3d', 'threewave', 'threespike', 'threegridbox', 'threespiketower', 'threeglitchcube', 'threeparticleburst', 'oscilloscope'];
   let eqStyle = {
     type: 'bars',
     colorStart: '#7fe9db',
@@ -7164,6 +8283,12 @@ export function createThreeEq(){
   // without ever fetching anything external.
   let threeEqModulePromise = null;
   let threeEqInstance = null;
+  let threeWaveEqInstance = null;
+  let threeSpikeOrbInstance = null;
+  let threeGridBoxInstance = null;
+  let threeSpikeTowerInstance = null;
+  let threeGlitchCubeInstance = null;
+  let threeParticleBurstInstance = null;
   let threeEqLoadFailed = false;
 
   function loadThreeEqModule(){
@@ -7181,6 +8306,12 @@ export function createThreeEq(){
     if(threeEqModulePromise || threeEqLoadFailed) return;
     threeEqModulePromise = loadThreeEqModule().then(function(mod){
       threeEqInstance = mod.createThreeEq();
+      threeWaveEqInstance = mod.createThreeWaveGrid();
+      threeSpikeOrbInstance = mod.createThreeSpikeOrb();
+      threeGridBoxInstance = mod.createThreeGridBox();
+      threeSpikeTowerInstance = mod.createThreeSpikeTower();
+      threeGlitchCubeInstance = mod.createThreeGlitchCube();
+      threeParticleBurstInstance = mod.createThreeParticleBurst();
     }).catch(function(err){
       threeEqLoadFailed = true;
       console.warn('[srt-maker] Three.js EQの初期化に失敗しました', err);
@@ -7198,6 +8329,60 @@ export function createThreeEq(){
     const dw = Math.max(2, Math.round(w)), dh = Math.max(2, Math.round(h));
     threeEqInstance.update(values, eqStyle, dw, dh);
     ctx.drawImage(threeEqInstance.canvas, 0, 0, w, h);
+  }
+
+  function drawEqThreeWave(ctx, w, h){
+    ensureThreeEqLoading();
+    if(!threeWaveEqInstance) return; // still loading (or failed) - skip this frame
+    const values = getBarValues(eqStyle.barCount);
+    const dw = Math.max(2, Math.round(w)), dh = Math.max(2, Math.round(h));
+    threeWaveEqInstance.update(values, eqStyle, dw, dh);
+    ctx.drawImage(threeWaveEqInstance.canvas, 0, 0, w, h);
+  }
+
+  function drawEqThreeSpikeOrb(ctx, w, h){
+    ensureThreeEqLoading();
+    if(!threeSpikeOrbInstance) return; // still loading (or failed) - skip this frame
+    const values = getBarValues(eqStyle.barCount);
+    const dw = Math.max(2, Math.round(w)), dh = Math.max(2, Math.round(h));
+    threeSpikeOrbInstance.update(values, eqStyle, dw, dh);
+    ctx.drawImage(threeSpikeOrbInstance.canvas, 0, 0, w, h);
+  }
+
+  function drawEqThreeGridBox(ctx, w, h){
+    ensureThreeEqLoading();
+    if(!threeGridBoxInstance) return; // still loading (or failed) - skip this frame
+    const values = getBarValues(eqStyle.barCount);
+    const dw = Math.max(2, Math.round(w)), dh = Math.max(2, Math.round(h));
+    threeGridBoxInstance.update(values, eqStyle, dw, dh);
+    ctx.drawImage(threeGridBoxInstance.canvas, 0, 0, w, h);
+  }
+
+  function drawEqThreeSpikeTower(ctx, w, h){
+    ensureThreeEqLoading();
+    if(!threeSpikeTowerInstance) return; // still loading (or failed) - skip this frame
+    const values = getBarValues(eqStyle.barCount);
+    const dw = Math.max(2, Math.round(w)), dh = Math.max(2, Math.round(h));
+    threeSpikeTowerInstance.update(values, eqStyle, dw, dh);
+    ctx.drawImage(threeSpikeTowerInstance.canvas, 0, 0, w, h);
+  }
+
+  function drawEqThreeGlitchCube(ctx, w, h){
+    ensureThreeEqLoading();
+    if(!threeGlitchCubeInstance) return; // still loading (or failed) - skip this frame
+    const values = getBarValues(eqStyle.barCount);
+    const dw = Math.max(2, Math.round(w)), dh = Math.max(2, Math.round(h));
+    threeGlitchCubeInstance.update(values, eqStyle, dw, dh);
+    ctx.drawImage(threeGlitchCubeInstance.canvas, 0, 0, w, h);
+  }
+
+  function drawEqThreeParticleBurst(ctx, w, h){
+    ensureThreeEqLoading();
+    if(!threeParticleBurstInstance) return; // still loading (or failed) - skip this frame
+    const values = getBarValues(eqStyle.barCount);
+    const dw = Math.max(2, Math.round(w)), dh = Math.max(2, Math.round(h));
+    threeParticleBurstInstance.update(values, eqStyle, dw, dh);
+    ctx.drawImage(threeParticleBurstInstance.canvas, 0, 0, w, h);
   }
 
   function drawEqOscilloscope(ctx, w, h){
@@ -7265,6 +8450,12 @@ export function createThreeEq(){
         case 'tunnel3d': drawEqTunnel3D(ctx, rect.w, rect.h); break;
         case 'rainbowcorona': drawEqRainbowCorona(ctx, rect.w, rect.h); break;
         case 'three3d': drawEqThree3D(ctx, rect.w, rect.h); break;
+        case 'threewave': drawEqThreeWave(ctx, rect.w, rect.h); break;
+        case 'threespike': drawEqThreeSpikeOrb(ctx, rect.w, rect.h); break;
+        case 'threegridbox': drawEqThreeGridBox(ctx, rect.w, rect.h); break;
+        case 'threespiketower': drawEqThreeSpikeTower(ctx, rect.w, rect.h); break;
+        case 'threeglitchcube': drawEqThreeGlitchCube(ctx, rect.w, rect.h); break;
+        case 'threeparticleburst': drawEqThreeParticleBurst(ctx, rect.w, rect.h); break;
         default: drawEqBars(ctx, rect.w, rect.h);
       }
     }
@@ -8453,6 +9644,12 @@ export function createThreeEq(){
           case 'tunnel3d': drawEqTunnel3D(recordCtx, rect.w, rect.h); break;
           case 'rainbowcorona': drawEqRainbowCorona(recordCtx, rect.w, rect.h); break;
           case 'three3d': drawEqThree3D(recordCtx, rect.w, rect.h); break;
+          case 'threewave': drawEqThreeWave(recordCtx, rect.w, rect.h); break;
+          case 'threespike': drawEqThreeSpikeOrb(recordCtx, rect.w, rect.h); break;
+          case 'threegridbox': drawEqThreeGridBox(recordCtx, rect.w, rect.h); break;
+          case 'threespiketower': drawEqThreeSpikeTower(recordCtx, rect.w, rect.h); break;
+          case 'threeglitchcube': drawEqThreeGlitchCube(recordCtx, rect.w, rect.h); break;
+          case 'threeparticleburst': drawEqThreeParticleBurst(recordCtx, rect.w, rect.h); break;
           default: drawEqBars(recordCtx, rect.w, rect.h);
         }
       }
