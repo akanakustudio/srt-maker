@@ -862,6 +862,7 @@
                 <option value="glitchblocks">グリッチブロック</option>
                 <option value="flamebars">フレイムバー</option>
                 <option value="flowglow">フローグロー</option>
+                <option value="tunnel3d">3Dトンネル</option>
               </optgroup>
               <optgroup label="サークル・シンメトリー">
                 <option value="circular">サークル</option>
@@ -914,6 +915,10 @@
           <label class="preview-control">
             <span>グロー</span>
             <input type="range" id="eqGlow" min="0" max="1" step="0.05" value="0.4">
+          </label>
+          <label class="preview-control">
+            <span>透過度</span>
+            <input type="range" id="eqOpacity" min="0.1" max="1" step="0.05" value="1">
           </label>
           <label class="preview-control">
             <span>横位置</span>
@@ -1195,6 +1200,7 @@
   const eqBarCountInput = document.getElementById('eqBarCount');
   const eqSmoothingInput = document.getElementById('eqSmoothing');
   const eqGlowInput = document.getElementById('eqGlow');
+  const eqOpacityInput = document.getElementById('eqOpacity');
   const eqSensitivityInput = document.getElementById('eqSensitivity');
   const eqPosXSelect = document.getElementById('eqPosX');
   const eqPosYSelect = document.getElementById('eqPosY');
@@ -1695,7 +1701,7 @@
   let eqEnabled = false;
   let eqRAF = null;
 
-  const EQ_TYPES = ['bars', 'mirror', 'wave', 'circular', 'dots', 'led', 'radialDots', 'polygon', 'rays', 'ripple', 'particles', 'orb', 'smoothline', 'auraring', 'neongrid', 'liquidblob', 'vumeter', 'ringpulse', 'petalring', 'glitchblocks', 'plexus', 'ribbonwave', 'flowglow', 'flamebars', 'gradientwave', 'oscilloscope'];
+  const EQ_TYPES = ['bars', 'mirror', 'wave', 'circular', 'dots', 'led', 'radialDots', 'polygon', 'rays', 'ripple', 'particles', 'orb', 'smoothline', 'auraring', 'neongrid', 'liquidblob', 'vumeter', 'ringpulse', 'petalring', 'glitchblocks', 'plexus', 'ribbonwave', 'flowglow', 'flamebars', 'gradientwave', 'tunnel3d', 'oscilloscope'];
   let eqStyle = {
     type: 'bars',
     colorStart: '#7fe9db',
@@ -1707,7 +1713,8 @@
     posY: 'center',
     width: 100,
     height: 100,
-    sensitivity: 1.5
+    sensitivity: 1.5,
+    opacity: 1
   };
 
   function clamp(v, min, max){ return Math.min(max, Math.max(min, v)); }
@@ -2570,6 +2577,50 @@
     }
   }
 
+  // Concentric polygon rings flying toward the viewer through a vanishing
+  // point - a classic "tunnel" visualizer technique that reads as strongly
+  // 3D/dynamic on a flat canvas. Each ring's silhouette is bumped outward by
+  // the current spectrum, rings grow and rotate continuously to simulate
+  // motion into the screen, and fade in from the vanishing point.
+  function drawEqTunnel3D(ctx, w, h){
+    const barCount = Math.max(16, Math.min(32, eqStyle.barCount));
+    const values = getBarValues(barCount);
+    const cx = w / 2, cy = h / 2;
+    const maxRadius = Math.max(w, h) * 0.75;
+    const ringCount = 10;
+    const now = performance.now();
+    const speed = now / 900;
+    const cycle = speed % 1;
+    for(let r = ringCount - 1; r >= 0; r--){
+      const z = (r + cycle) / ringCount;
+      const easedZ = Math.pow(z, 2.2);
+      const radius = 16 + easedZ * maxRadius;
+      const alpha = Math.min(1, z * 1.3) * 0.85;
+      const rotation = speed * 0.4 + r * 0.15;
+      ctx.beginPath();
+      for(let i = 0; i <= barCount; i++){
+        const idx = i % barCount;
+        const angle = (i / barCount) * Math.PI * 2 + rotation;
+        const bump = values[idx] * radius * 0.18;
+        const rr = radius + bump;
+        const x = cx + Math.cos(angle) * rr;
+        const y = cy + Math.sin(angle) * rr;
+        if(i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = hexToRgba(z < 0.5 ? eqStyle.colorEnd : eqStyle.colorStart, alpha);
+      ctx.lineWidth = Math.max(1, 1 + z * 4);
+      ctx.stroke();
+    }
+    const coreR = maxRadius * 0.15;
+    const coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, coreR));
+    coreGrad.addColorStop(0, hexToRgba(eqStyle.colorStart, 0.5));
+    coreGrad.addColorStop(1, hexToRgba(eqStyle.colorStart, 0));
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, coreR, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   function drawEqOscilloscope(ctx, w, h){
     const data = eqTimeDataArray;
     const len = data.length;
@@ -2599,6 +2650,7 @@
     const rect = computeEqRect(cw, ch);
     ctx.save();
     ctx.translate(rect.x, rect.y);
+    ctx.globalAlpha = eqStyle.opacity;
     ctx.shadowBlur = eqStyle.glow * 24;
     ctx.shadowColor = eqStyle.colorStart;
     if(eqStyle.type === 'oscilloscope'){
@@ -2631,6 +2683,7 @@
         case 'flowglow': drawEqFlowGlow(ctx, rect.w, rect.h); break;
         case 'flamebars': drawEqFlameBars(ctx, rect.w, rect.h); break;
         case 'gradientwave': drawEqGradientWave(ctx, rect.w, rect.h); break;
+        case 'tunnel3d': drawEqTunnel3D(ctx, rect.w, rect.h); break;
         default: drawEqBars(ctx, rect.w, rect.h);
       }
     }
@@ -2683,6 +2736,7 @@
     eqSmoothingInput.value = style.smoothing;
     eqSensitivityInput.value = style.sensitivity;
     eqGlowInput.value = style.glow;
+    eqOpacityInput.value = style.opacity;
     eqPosXSelect.value = style.posX;
     eqPosYSelect.value = style.posY;
     eqWidthInput.value = style.width;
@@ -2706,6 +2760,7 @@
     if(analyserNode) analyserNode.smoothingTimeConstant = eqStyle.smoothing;
   });
   eqGlowInput.addEventListener('input', function(){ eqStyle.glow = parseFloat(eqGlowInput.value); });
+  eqOpacityInput.addEventListener('input', function(){ eqStyle.opacity = parseFloat(eqOpacityInput.value); });
   eqSensitivityInput.addEventListener('input', function(){ eqStyle.sensitivity = parseFloat(eqSensitivityInput.value); });
   eqPosXSelect.addEventListener('change', function(){ eqStyle.posX = eqPosXSelect.value; });
   eqPosYSelect.addEventListener('change', function(){ eqStyle.posY = eqPosYSelect.value; });
@@ -3121,7 +3176,8 @@
       posY: ['top','center','bottom'].indexOf(obj.posY) !== -1 ? obj.posY : 'center',
       width: clamp(parseInt(obj.width, 10) || 100, 10, 100),
       height: clamp(parseInt(obj.height, 10) || 100, 10, 100),
-      sensitivity: clamp(isNaN(parseFloat(obj.sensitivity)) ? 1.5 : parseFloat(obj.sensitivity), 0.5, 3)
+      sensitivity: clamp(isNaN(parseFloat(obj.sensitivity)) ? 1.5 : parseFloat(obj.sensitivity), 0.5, 3),
+      opacity: clamp(isNaN(parseFloat(obj.opacity)) ? 1 : parseFloat(obj.opacity), 0.1, 1)
     };
   }
 
@@ -3579,6 +3635,7 @@
       const rect = computeEqRect(w, h, scale);
       recordCtx.save();
       recordCtx.translate(rect.x, rect.y);
+      recordCtx.globalAlpha = eqStyle.opacity;
       recordCtx.shadowBlur = eqStyle.glow * 24 * scale;
       recordCtx.shadowColor = eqStyle.colorStart;
       if(eqStyle.type === 'oscilloscope'){
@@ -3611,6 +3668,7 @@
           case 'flowglow': drawEqFlowGlow(recordCtx, rect.w, rect.h); break;
           case 'flamebars': drawEqFlameBars(recordCtx, rect.w, rect.h); break;
           case 'gradientwave': drawEqGradientWave(recordCtx, rect.w, rect.h); break;
+          case 'tunnel3d': drawEqTunnel3D(recordCtx, rect.w, rect.h); break;
           default: drawEqBars(recordCtx, rect.w, rect.h);
         }
       }
