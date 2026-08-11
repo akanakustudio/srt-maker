@@ -264,8 +264,16 @@
   .lyrics-text-editor-actions{display:flex;justify-content:flex-end;gap:10px;}
 
   /* ---------- Lyrics preview ---------- */
-  .preview-panel{
-    border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden;
+  /* --preview-* custom properties (font, background, mask, text position...)
+     are all set on document.documentElement by JS (applyPreviewStyle() etc.),
+     not declared here - .preview-single-text/.preview-line must inherit them
+     all the way from <html> unshadowed, because the preview-stage-outer node
+     can be relocated outside .preview-panel into the floating popup, and CSS
+     custom property inheritance resolves from the nearest ancestor that
+     declares the property, not necessarily :root. A static fallback here
+     would permanently win over the live value whenever still docked. Default
+     fallbacks live in each var(--x, fallback) usage instead where needed. */
+  :root{
     --preview-font-family: var(--sans);
     --preview-single-size: clamp(20px,4vw,34px);
     --preview-all-size: 14px;
@@ -281,6 +289,9 @@
     --preview-bg-position: 50% 50%;
     --preview-text-x: 50%;
     --preview-text-y: 50%;
+  }
+  .preview-panel{
+    border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden;
   }
   .preview-panel .panel-head{padding:14px 16px 0;margin-bottom:0;}
   .preview-toggle-group{display:flex;gap:14px;flex-wrap:wrap;}
