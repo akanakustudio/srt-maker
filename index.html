@@ -329,6 +329,71 @@
     background:var(--panel2);cursor:pointer;
   }
   .preview-control input[type=range]{width:88px;accent-color:var(--accent);}
+  .eq-color-preset-control{align-items:flex-start;position:relative;}
+  .eq-color-preset-dropdown{position:relative;}
+  .eq-color-preset-trigger{
+    display:flex;align-items:center;gap:7px;background:var(--panel2);border:1px solid var(--line);
+    color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px;cursor:pointer;min-width:150px;
+  }
+  .eq-color-preset-trigger:hover{border-color:var(--accent-dim);}
+  .eq-color-preset-trigger-swatch{
+    width:18px;height:18px;border-radius:5px;flex:none;border:1px solid var(--line);box-sizing:border-box;
+  }
+  .eq-color-preset-trigger-label{flex:1;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .eq-color-preset-trigger .chev{width:14px;height:14px;flex:none;color:var(--muted);transition:transform .15s ease;}
+  .eq-color-preset-dropdown.open .eq-color-preset-trigger .chev{transform:rotate(180deg);}
+  .eq-color-preset-panel{
+    position:absolute;top:calc(100% + 5px);left:0;z-index:30;
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    box-shadow:0 10px 28px rgba(0,0,0,.45);padding:6px;
+  }
+  .eq-color-preset-panel[hidden]{display:none;}
+  .eq-color-preset-list{
+    display:flex;flex-wrap:wrap;align-content:flex-start;gap:5px;width:240px;max-height:220px;
+    overflow-y:auto;padding:2px;
+  }
+  .eq-color-preset-group-label{
+    flex:0 0 100%;font-size:10.5px;color:var(--muted2);margin:4px 0 1px;padding-top:3px;
+    border-top:1px solid var(--line);
+  }
+  .eq-color-preset-group-label:first-child{margin-top:0;border-top:none;padding-top:0;}
+  .eq-color-preset-swatch{
+    width:22px;height:22px;padding:0;border-radius:6px;flex:none;cursor:pointer;
+    border:2px solid var(--line);box-sizing:border-box;
+  }
+  .eq-color-preset-swatch:hover{border-color:var(--accent-dim);}
+  .eq-color-preset-swatch.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}
+  .eq-color-preset-bookmark-add{
+    flex:0 0 100%;background:var(--panel);border:1px dashed var(--line);color:var(--muted);
+    border-radius:6px;padding:4px 6px;font-size:11px;cursor:pointer;
+  }
+  .eq-color-preset-bookmark-add:hover{border-color:var(--accent-dim);color:var(--text);}
+  .eq-color-bookmark-list{display:flex;flex-wrap:wrap;gap:5px;flex:0 0 100%;}
+  .eq-color-bookmark-list:empty{display:none;}
+  .eq-color-bookmark-chip{position:relative;flex:none;}
+  .eq-color-bookmark-chip .eq-color-preset-swatch{width:22px;height:22px;}
+  .eq-color-bookmark-chip .bookmark-del{
+    position:absolute;top:-5px;right:-5px;width:14px;height:14px;line-height:12px;
+    border-radius:50%;background:var(--panel);border:1px solid var(--line);color:var(--muted);
+    font-size:10px;cursor:pointer;padding:0;text-align:center;
+  }
+  .eq-color-bookmark-chip .bookmark-del:hover{color:var(--danger);border-color:var(--danger);}
+
+  .bookmark-row{width:100%;flex-wrap:wrap;}
+  .bookmark-chip-list{display:flex;flex-wrap:wrap;gap:5px;width:100%;}
+  .bookmark-chip{
+    display:inline-flex;align-items:stretch;border:1px solid var(--line);border-radius:6px;
+    overflow:hidden;background:var(--panel2);
+  }
+  .bookmark-chip-apply{
+    background:none;border:none;color:var(--text);font-size:11px;padding:4px 7px;cursor:pointer;
+  }
+  .bookmark-chip-apply:hover{background:rgba(51,214,192,.12);color:var(--accent);}
+  .bookmark-chip-del{
+    background:none;border:none;border-left:1px solid var(--line);color:var(--muted);
+    font-size:10px;padding:4px 6px;cursor:pointer;
+  }
+  .bookmark-chip-del:hover{color:var(--danger);}
   .preview-control input[type=text]{
     background:var(--panel2);border:1px solid var(--line);color:var(--text);
     border-radius:6px;padding:5px 8px;font-size:12px;width:220px;
@@ -817,6 +882,11 @@
             <input type="range" id="lyricsOffsetRange" min="-2" max="2" step="0.05" value="0">
             <input type="number" id="lyricsOffsetNumber" min="-2" max="2" step="0.05" value="0">
           </label>
+          <div class="preview-control bookmark-row">
+            <span>フォントブックマーク</span>
+            <button class="toggle-btn" type="button" id="fontBookmarkAddBtn">＋現在のフォント設定を保存</button>
+          </div>
+          <div class="bookmark-chip-list" id="fontBookmarkList"></div>
         </div>
       </details>
       <details class="param-section" open>
@@ -825,6 +895,11 @@
           <label class="toggle-btn" for="previewBgInput">背景を設定（画像/動画）</label>
           <input type="file" id="previewBgInput" accept="image/*,video/*" style="display:none">
           <button class="toggle-btn" type="button" id="previewBgClearBtn" disabled>背景をクリア</button>
+          <button class="toggle-btn active" type="button" id="previewBgVisibleToggle" disabled>背景を表示</button>
+          <label class="preview-control">
+            <span>背景の透過度</span>
+            <input type="range" id="bgOpacity" min="0" max="1" step="0.05" value="1">
+          </label>
           <label class="preview-control">
             <span>背景サイズ</span>
             <select id="bgSizeMode">
@@ -913,6 +988,102 @@
               </optgroup>
             </select>
           </label>
+          <div class="preview-control eq-color-preset-control">
+            <span>カラーパターン</span>
+            <div class="eq-color-preset-dropdown" id="eqColorPresetDropdown">
+              <button type="button" class="eq-color-preset-trigger" id="eqColorPresetTrigger">
+                <span class="eq-color-preset-trigger-swatch" id="eqColorPresetTriggerSwatch"></span>
+                <span class="eq-color-preset-trigger-label" id="eqColorPresetTriggerLabel">カスタム</span>
+                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+              </button>
+              <div class="eq-color-preset-panel" id="eqColorPresetPanel" hidden>
+            <div class="eq-color-preset-list" id="eqColorPresetList">
+              <div class="eq-color-preset-group-label">オリジナル</div>
+              <button type="button" class="eq-color-preset-swatch" data-start="#7fe9db" data-end="#33d6c0" title="シアン×ブルー" style="background:linear-gradient(135deg,#7fe9db,#33d6c0)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#ff6a3d" data-end="#ffd23d" title="サンセット" style="background:linear-gradient(135deg,#ff6a3d,#ffd23d)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#ff3d9a" data-end="#7c3dff" title="ネオンピンク" style="background:linear-gradient(135deg,#ff3d9a,#7c3dff)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#a78bfa" data-end="#33d6c0" title="エレクトリックパープル" style="background:linear-gradient(135deg,#a78bfa,#33d6c0)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#ffcf9e" data-end="#c9793f" title="ゴールド" style="background:linear-gradient(135deg,#ffcf9e,#c9793f)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#a7c7ff" data-end="#7fe9ff" title="アイスブルー" style="background:linear-gradient(135deg,#a7c7ff,#7fe9ff)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#ff9f6a" data-end="#7a3320" title="フレイム" style="background:linear-gradient(135deg,#ff9f6a,#7a3320)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#f5f5f5" data-end="#8a8a8a" title="モノクローム" style="background:linear-gradient(135deg,#f5f5f5,#8a8a8a)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#ff9ecf" data-end="#7fe9ff" title="キャンディ" style="background:linear-gradient(135deg,#ff9ecf,#7fe9ff)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#d4ff3d" data-end="#33d6c0" title="ライム" style="background:linear-gradient(135deg,#d4ff3d,#33d6c0)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#ffb6d9" data-end="#a78bfa" title="ローズ" style="background:linear-gradient(135deg,#ffb6d9,#a78bfa)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#7fe9ff" data-end="#33d6c0" title="ミント" style="background:linear-gradient(135deg,#7fe9ff,#33d6c0)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#00d4ff" data-end="#ff2d95" title="エクリプス" style="background:linear-gradient(135deg,#00d4ff,#ff2d95)"></button>
+              <div class="eq-color-preset-group-label">ポップ＆カジュアル</div>
+              <button type="button" class="eq-color-preset-swatch" data-start="#FF3030" data-end="#87CEFA" title="ポップカラー1" style="background:linear-gradient(135deg,#FF3030,#FFA500,#87CEFA)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#FFD700" data-end="#40E0D0" title="ポップカラー2" style="background:linear-gradient(135deg,#FFD700,#FF69B4,#40E0D0)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#32CD32" data-end="#8A2BE2" title="ポップカラー3" style="background:linear-gradient(135deg,#32CD32,#FFFF00,#8A2BE2)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#6B8E23" data-end="#1A2E78" title="カジュアルカラー1" style="background:linear-gradient(135deg,#6B8E23,#FFDB58,#1A2E78)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#F4A460" data-end="#FFFFFF" title="カジュアルカラー2" style="background:linear-gradient(135deg,#F4A460,#4682B4,#FFFFFF)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#844D26" data-end="#FAF3E0" title="カジュアルカラー3" style="background:linear-gradient(135deg,#844D26,#87CEEB,#FAF3E0)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#FF1493" data-end="#32CD32" title="ネオンカラー1" style="background:linear-gradient(135deg,#FF1493,#FFFF33,#32CD32)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#FFFF00" data-end="#007FFF" title="ネオンカラー2" style="background:linear-gradient(135deg,#FFFF00,#BF00FF,#007FFF)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#7DF9FF" data-end="#FF4500" title="ネオンカラー3" style="background:linear-gradient(135deg,#7DF9FF,#FF2DFF,#FF4500)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#FF4500" data-end="#0073E6" title="ビビッドカラー1" style="background:linear-gradient(135deg,#FF4500,#FF007F,#0073E6)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#00FFFF" data-end="#32CD32" title="ビビッドカラー2" style="background:linear-gradient(135deg,#00FFFF,#FFFF00,#32CD32)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#1A98FF" data-end="#FF00FF" title="ビビッドカラー3" style="background:linear-gradient(135deg,#1A98FF,#00FF40,#FF00FF)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#FFFACD" data-end="#FFDAB9" title="パステルカラー1" style="background:linear-gradient(135deg,#FFFACD,#B0E0E6,#FFDAB9)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#FFD1DC" data-end="#E6E6FA" title="パステルカラー2" style="background:linear-gradient(135deg,#FFD1DC,#BFFFBF,#E6E6FA)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#A0D8EF" data-end="#FFFDD0" title="パステルカラー3" style="background:linear-gradient(135deg,#A0D8EF,#FF6F61,#FFFDD0)"></button>
+              <div class="eq-color-preset-group-label">クール＆モダン</div>
+              <button type="button" class="eq-color-preset-swatch" data-start="#000000" data-end="#808080" title="モノトーン1" style="background:linear-gradient(135deg,#000000,#FFFFFF,#808080)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#36454F" data-end="#FFFFFF" title="モノトーン2" style="background:linear-gradient(135deg,#36454F,#D3D3D3,#FFFFFF)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#708090" data-end="#A9A9A9" title="モノトーン3" style="background:linear-gradient(135deg,#708090,#FAF3E0,#A9A9A9)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#000080" data-end="#FFFFFF" title="クールブルー1" style="background:linear-gradient(135deg,#000080,#48D1CC,#FFFFFF)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#B0E0E6" data-end="#D3D3D3" title="クールブルー2" style="background:linear-gradient(135deg,#B0E0E6,#4682B4,#D3D3D3)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#4169E1" data-end="#F5F5F5" title="クールブルー3" style="background:linear-gradient(135deg,#4169E1,#191970,#F5F5F5)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#1B03A3" data-end="#00FF00" title="サイバーカラー1" style="background:linear-gradient(135deg,#1B03A3,#FF1493,#00FF00)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#0088FF" data-end="#708090" title="サイバーカラー2" style="background:linear-gradient(135deg,#0088FF,#FF00AA,#708090)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#082567" data-end="#FFFF66" title="サイバーカラー3" style="background:linear-gradient(135deg,#082567,#FA245F,#FFFF66)"></button>
+              <div class="eq-color-preset-group-label">シンプル＆ナチュラル</div>
+              <button type="button" class="eq-color-preset-swatch" data-start="#D3C6A6" data-end="#264653" title="アースカラー1" style="background:linear-gradient(135deg,#D3C6A6,#FFFFF0,#264653)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#8B4513" data-end="#BEBEBE" title="アースカラー3" style="background:linear-gradient(135deg,#8B4513,#FFDB58,#BEBEBE)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#D3C6A6" data-end="#FFFFFF" title="ニュートラルカラー1" style="background:linear-gradient(135deg,#D3C6A6,#483C32,#FFFFFF)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#FFFFF0" data-end="#A9A9A9" title="ニュートラルカラー2" style="background:linear-gradient(135deg,#FFFFF0,#D3D3D3,#A9A9A9)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#BEBEBE" data-end="#D8A7B1" title="ニュートラルカラー3" style="background:linear-gradient(135deg,#BEBEBE,#C4A484,#D8A7B1)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#013220" data-end="#FAF3E0" title="ビジネスカラー1" style="background:linear-gradient(135deg,#013220,#36454F,#FAF3E0)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#000080" data-end="#FFFFFF" title="ビジネスカラー2" style="background:linear-gradient(135deg,#000080,#D6D6BC,#FFFFFF)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#808080" data-end="#F5E6C4" title="ビジネスカラー3" style="background:linear-gradient(135deg,#808080,#800000,#F5E6C4)"></button>
+              <div class="eq-color-preset-group-label">エレガント＆ラグジュアリー</div>
+              <button type="button" class="eq-color-preset-swatch" data-start="#8B5E3C" data-end="#F8F5F0" title="ラグジュアリーカラー1" style="background:linear-gradient(135deg,#8B5E3C,#7B001C,#F8F5F0)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#996515" data-end="#000000" title="ラグジュアリーカラー2" style="background:linear-gradient(135deg,#996515,#B2A59B,#000000)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#1B2A49" data-end="#FFFFFF" title="ラグジュアリーカラー3" style="background:linear-gradient(135deg,#1B2A49,#B5A999,#FFFFFF)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#B76E79" data-end="#F2E8DC" title="エレガントローズ1" style="background:linear-gradient(135deg,#B76E79,#9BB0C1,#F2E8DC)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#65000B" data-end="#FFFFFF" title="エレガントローズ2" style="background:linear-gradient(135deg,#65000B,#B7A99A,#FFFFFF)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#4B2C5E" data-end="#000000" title="エレガントローズ3" style="background:linear-gradient(135deg,#4B2C5E,#E4C6C6,#000000)"></button>
+              <div class="eq-color-preset-group-label">和風</div>
+              <button type="button" class="eq-color-preset-swatch" data-start="#B22C36" data-end="#A58AC4" title="自然の色調1" style="background:linear-gradient(135deg,#B22C36,#E6672E,#A58AC4)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#275A44" data-end="#D7C4BB" title="自然の色調2" style="background:linear-gradient(135deg,#275A44,#8F5A28,#D7C4BB)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#DAC6B5" data-end="#4A91C9" title="自然の色調3" style="background:linear-gradient(135deg,#DAC6B5,#7BA7A1,#4A91C9)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#16160E" data-end="#EAE5DA" title="伝統的な色調1" style="background:linear-gradient(135deg,#16160E,#D9333F,#EAE5DA)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#D3381C" data-end="#00736C" title="伝統的な色調2" style="background:linear-gradient(135deg,#D3381C,#E6A5B6,#00736C)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#2A5CAB" data-end="#B98C46" title="伝統的な色調3" style="background:linear-gradient(135deg,#2A5CAB,#FFF7E1,#B98C46)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#E85959" data-end="#D9C5B2" title="雅な色調1" style="background:linear-gradient(135deg,#E85959,#F6AD49,#D9C5B2)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#D74894" data-end="#F8F4E6" title="雅な色調2" style="background:linear-gradient(135deg,#D74894,#F5A191,#F8F4E6)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#8C77CF" data-end="#D3CA82" title="雅な色調3" style="background:linear-gradient(135deg,#8C77CF,#BFB1ED,#D3CA82)"></button>
+              <div class="eq-color-preset-group-label">季節</div>
+              <button type="button" class="eq-color-preset-swatch" data-start="#F4C6C3" data-end="#F9F7F0" title="春1" style="background:linear-gradient(135deg,#F4C6C3,#A2D5AB,#F9F7F0)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#A7D8F0" data-end="#F8AFA6" title="春2" style="background:linear-gradient(135deg,#A7D8F0,#FCE77C,#F8AFA6)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#B49AC2" data-end="#F88379" title="春3" style="background:linear-gradient(135deg,#B49AC2,#EADDC8,#F88379)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#FFD300" data-end="#FFFFFF" title="夏1" style="background:linear-gradient(135deg,#FFD300,#87CEEB,#FFFFFF)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#007ACD" data-end="#BFEFEF" title="夏2" style="background:linear-gradient(135deg,#007ACD,#00E5EE,#BFEFEF)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#FFF44F" data-end="#40E0D0" title="夏3" style="background:linear-gradient(135deg,#FFF44F,#FF6F91,#40E0D0)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#D4A017" data-end="#5C4033" title="秋1" style="background:linear-gradient(135deg,#D4A017,#800020,#5C4033)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#E2725B" data-end="#F5DEB3" title="秋2" style="background:linear-gradient(135deg,#E2725B,#808000,#F5DEB3)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#C19A6B" data-end="#FAF3E0" title="秋3" style="background:linear-gradient(135deg,#C19A6B,#C75B39,#FAF3E0)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#191970" data-end="#F7E7CE" title="冬1" style="background:linear-gradient(135deg,#191970,#D3D3D3,#F7E7CE)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#800020" data-end="#6F4E37" title="冬2" style="background:linear-gradient(135deg,#800020,#FFF0D6,#6F4E37)"></button>
+              <button type="button" class="eq-color-preset-swatch" data-start="#1D2951" data-end="#AFDBE9" title="冬3" style="background:linear-gradient(135deg,#1D2951,#7851A9,#AFDBE9)"></button>
+              <div class="eq-color-preset-group-label">マイブックマーク</div>
+              <div class="eq-color-bookmark-list" id="eqColorBookmarkList"></div>
+              <button type="button" class="eq-color-preset-bookmark-add" id="eqColorBookmarkAddBtn" title="現在のカラー1・カラー2をブックマークに保存">＋現在の色を保存</button>
+            </div>
+              </div>
+            </div>
+          </div>
           <label class="preview-control">
             <span>カラー1</span>
             <input type="color" id="eqColorStart" value="#7fe9db">
@@ -931,7 +1102,7 @@
           </label>
           <label class="preview-control" title="曲が静かでEQがあまり動かない時は上げてください">
             <span>感度（基準レベル）</span>
-            <input type="range" id="eqSensitivity" min="0.5" max="3" step="0.1" value="1">
+            <input type="range" id="eqSensitivity" min="0.05" max="3" step="0.05" value="1">
           </label>
           <label class="preview-control">
             <span>グロー</span>
@@ -966,6 +1137,11 @@
             <input type="range" id="eqHeight" min="10" max="100" step="5" value="100">
           </label>
           <button class="toggle-btn" type="button" id="eqAutoStyleBtn">曲の雰囲気から自動生成</button>
+          <div class="preview-control bookmark-row">
+            <span>EQブックマーク</span>
+            <button class="toggle-btn" type="button" id="eqBookmarkAddBtn">＋現在のEQ設定を保存</button>
+          </div>
+          <div class="bookmark-chip-list" id="eqBookmarkList"></div>
         </div>
       </details>
       <details class="param-section" open>
@@ -5438,6 +5614,8 @@ export function createThreeEq(){
   const transitionOutDurationInput = document.getElementById('transitionOutDuration');
   const lyricsOffsetRange = document.getElementById('lyricsOffsetRange');
   const lyricsOffsetNumber = document.getElementById('lyricsOffsetNumber');
+  const fontBookmarkAddBtn = document.getElementById('fontBookmarkAddBtn');
+  const fontBookmarkList = document.getElementById('fontBookmarkList');
   const highlightModeLineBtn = document.getElementById('highlightModeLine');
   const highlightModeTextBtn = document.getElementById('highlightModeText');
   const previewStageOuter = document.getElementById('previewStageOuter');
@@ -5446,6 +5624,8 @@ export function createThreeEq(){
   const previewEqCanvas = document.getElementById('previewEqCanvas');
   const previewBgInput = document.getElementById('previewBgInput');
   const previewBgClearBtn = document.getElementById('previewBgClearBtn');
+  const previewBgVisibleToggle = document.getElementById('previewBgVisibleToggle');
+  const bgOpacityInput = document.getElementById('bgOpacity');
   const previewBgVideo = document.getElementById('previewBgVideo');
   const bgSizeModeSelect = document.getElementById('bgSizeMode');
   const bgZoomInput = document.getElementById('bgZoom');
@@ -5466,6 +5646,14 @@ export function createThreeEq(){
   const previewPopupFullscreenBtn = document.getElementById('previewPopupFullscreenBtn');
   const previewPopupCloseBtn = document.getElementById('previewPopupCloseBtn');
   const eqStyleTypeSelect = document.getElementById('eqStyleType');
+  const eqColorPresetDropdown = document.getElementById('eqColorPresetDropdown');
+  const eqColorPresetTrigger = document.getElementById('eqColorPresetTrigger');
+  const eqColorPresetTriggerSwatch = document.getElementById('eqColorPresetTriggerSwatch');
+  const eqColorPresetTriggerLabel = document.getElementById('eqColorPresetTriggerLabel');
+  const eqColorPresetPanel = document.getElementById('eqColorPresetPanel');
+  const eqColorPresetList = document.getElementById('eqColorPresetList');
+  const eqColorBookmarkList = document.getElementById('eqColorBookmarkList');
+  const eqColorBookmarkAddBtn = document.getElementById('eqColorBookmarkAddBtn');
   const eqColorStartInput = document.getElementById('eqColorStart');
   const eqColorEndInput = document.getElementById('eqColorEnd');
   const eqBarCountInput = document.getElementById('eqBarCount');
@@ -5478,6 +5666,8 @@ export function createThreeEq(){
   const eqWidthInput = document.getElementById('eqWidth');
   const eqHeightInput = document.getElementById('eqHeight');
   const eqAutoStyleBtn = document.getElementById('eqAutoStyleBtn');
+  const eqBookmarkAddBtn = document.getElementById('eqBookmarkAddBtn');
+  const eqBookmarkList = document.getElementById('eqBookmarkList');
   const previewStyleSaveBtn = document.getElementById('previewStyleSaveBtn');
   const previewStyleLoadInput = document.getElementById('previewStyleLoadInput');
   const exportResolutionSelect = document.getElementById('exportResolution');
@@ -5491,6 +5681,7 @@ export function createThreeEq(){
   let previewBgUrl = null;
   let currentBgKind = null; // 'image' | 'video' | null
   let currentBgFile = null;
+  let bgVisible = true;
 
   const SYSTEM_FONTS = [
     { key:'sans', label:'ゴシック（システム）', css: "-apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', 'Segoe UI', sans-serif" },
@@ -5806,6 +5997,23 @@ export function createThreeEq(){
     el.addEventListener('input', applyBgTransform);
   });
   applyBgTransform();
+
+  function applyBgOpacity(){
+    previewBg.style.opacity = bgOpacityInput.value;
+  }
+  bgOpacityInput.addEventListener('input', applyBgOpacity);
+  applyBgOpacity();
+
+  function applyBgVisibility(){
+    previewBg.style.visibility = bgVisible ? '' : 'hidden';
+    previewBgVisibleToggle.classList.toggle('active', bgVisible);
+  }
+  previewBgVisibleToggle.addEventListener('click', function(){
+    bgVisible = !bgVisible;
+    applyBgVisibility();
+    scheduleSaveSession();
+  });
+  applyBgVisibility();
   previewBgVideo.addEventListener('loadedmetadata', applyBgVideoLayout);
   if(typeof ResizeObserver !== 'undefined'){
     new ResizeObserver(applyBgVideoLayout).observe(previewStage);
@@ -5943,6 +6151,7 @@ export function createThreeEq(){
     }
     previewBg.classList.add('has-image');
     previewBgClearBtn.disabled = false;
+    previewBgVisibleToggle.disabled = false;
   }
 
   previewBgInput.addEventListener('change', function(e){
@@ -5960,6 +6169,9 @@ export function createThreeEq(){
     previewBg.classList.remove('has-image');
     clearPreviewBgVideo();
     previewBgClearBtn.disabled = true;
+    previewBgVisibleToggle.disabled = true;
+    bgVisible = true;
+    applyBgVisibility();
     previewBgInput.value = '';
     loadPreviewBgImage(null);
   }
@@ -7096,6 +7308,44 @@ export function createThreeEq(){
     eqStageResizeObserver.observe(previewStage);
   }
 
+  /* ---------- Bookmarks (EQ style / color pattern / font): localStorage-backed named presets ---------- */
+  const BOOKMARK_STORAGE_KEYS = {
+    eq: 'srt-maker-bookmarks-eq',
+    color: 'srt-maker-bookmarks-color',
+    font: 'srt-maker-bookmarks-font'
+  };
+
+  function loadBookmarks(kind){
+    try {
+      const raw = localStorage.getItem(BOOKMARK_STORAGE_KEYS[kind]);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch(e){ return []; }
+  }
+
+  function saveBookmarks(kind, list){
+    try { localStorage.setItem(BOOKMARK_STORAGE_KEYS[kind], JSON.stringify(list)); } catch(e){}
+  }
+
+  function addBookmark(kind, name, data){
+    const list = loadBookmarks(kind);
+    list.push({ name: name, data: data });
+    saveBookmarks(kind, list);
+  }
+
+  function deleteBookmark(kind, index){
+    const list = loadBookmarks(kind);
+    list.splice(index, 1);
+    saveBookmarks(kind, list);
+  }
+
+  function promptBookmarkName(){
+    const name = window.prompt('ブックマーク名を入力してください');
+    if(name === null) return null;
+    const trimmed = name.trim();
+    return trimmed === '' ? null : trimmed;
+  }
+
   /* ---------- EQ style customization ---------- */
   function applyEqStyleToUI(style){
     eqStyleTypeSelect.value = style.type;
@@ -7110,6 +7360,7 @@ export function createThreeEq(){
     eqPosYSelect.value = style.posY;
     eqWidthInput.value = style.width;
     eqHeightInput.value = style.height;
+    markActiveColorPresetSwatch();
   }
 
   function setEqStyle(style){
@@ -7119,8 +7370,86 @@ export function createThreeEq(){
   }
 
   eqStyleTypeSelect.addEventListener('change', function(){ eqStyle.type = eqStyleTypeSelect.value; });
-  eqColorStartInput.addEventListener('input', function(){ eqStyle.colorStart = eqColorStartInput.value; });
-  eqColorEndInput.addEventListener('input', function(){ eqStyle.colorEnd = eqColorEndInput.value; });
+  function markActiveColorPresetSwatch(){
+    const swatches = eqColorPresetList.querySelectorAll('.eq-color-preset-swatch');
+    let activeTitle = null;
+    for(let i = 0; i < swatches.length; i++){
+      const sw = swatches[i];
+      const isActive = sw.dataset.start === eqStyle.colorStart && sw.dataset.end === eqStyle.colorEnd;
+      sw.classList.toggle('active', isActive);
+      if(isActive && activeTitle === null) activeTitle = sw.title;
+    }
+    eqColorPresetTriggerSwatch.style.background = 'linear-gradient(135deg,' + eqStyle.colorStart + ',' + eqStyle.colorEnd + ')';
+    eqColorPresetTriggerLabel.textContent = activeTitle || 'カスタム';
+  }
+  function closeColorPresetPanel(){
+    eqColorPresetPanel.hidden = true;
+    eqColorPresetDropdown.classList.remove('open');
+  }
+  eqColorPresetTrigger.addEventListener('click', function(e){
+    e.stopPropagation();
+    const willOpen = eqColorPresetPanel.hidden;
+    closeColorPresetPanel();
+    if(willOpen){
+      eqColorPresetPanel.hidden = false;
+      eqColorPresetDropdown.classList.add('open');
+    }
+  });
+  document.addEventListener('click', function(e){
+    if(!eqColorPresetDropdown.contains(e.target)) closeColorPresetPanel();
+  });
+  document.addEventListener('keydown', function(e){
+    if(e.key === 'Escape') closeColorPresetPanel();
+  });
+  eqColorPresetList.addEventListener('click', function(e){
+    const btn = e.target.closest('.eq-color-preset-swatch');
+    if(!btn) return;
+    eqStyle.colorStart = btn.dataset.start;
+    eqStyle.colorEnd = btn.dataset.end;
+    eqColorStartInput.value = btn.dataset.start;
+    eqColorEndInput.value = btn.dataset.end;
+    markActiveColorPresetSwatch();
+    closeColorPresetPanel();
+  });
+  eqColorStartInput.addEventListener('input', function(){ eqStyle.colorStart = eqColorStartInput.value; markActiveColorPresetSwatch(); });
+  eqColorEndInput.addEventListener('input', function(){ eqStyle.colorEnd = eqColorEndInput.value; markActiveColorPresetSwatch(); });
+
+  function renderColorBookmarks(){
+    const list = loadBookmarks('color');
+    eqColorBookmarkList.innerHTML = '';
+    list.forEach(function(bm, idx){
+      const chip = document.createElement('div');
+      chip.className = 'eq-color-bookmark-chip';
+      const swatch = document.createElement('button');
+      swatch.type = 'button';
+      swatch.className = 'eq-color-preset-swatch';
+      swatch.dataset.start = bm.data.colorStart;
+      swatch.dataset.end = bm.data.colorEnd;
+      swatch.title = bm.name;
+      swatch.style.background = 'linear-gradient(135deg,' + bm.data.colorStart + ',' + bm.data.colorEnd + ')';
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'bookmark-del';
+      del.textContent = '×';
+      del.title = 'ブックマークを削除';
+      del.addEventListener('click', function(e){
+        e.stopPropagation();
+        deleteBookmark('color', idx);
+        renderColorBookmarks();
+      });
+      chip.appendChild(swatch);
+      chip.appendChild(del);
+      eqColorBookmarkList.appendChild(chip);
+    });
+    markActiveColorPresetSwatch();
+  }
+  eqColorBookmarkAddBtn.addEventListener('click', function(){
+    const name = promptBookmarkName();
+    if(!name) return;
+    addBookmark('color', name, { colorStart: eqStyle.colorStart, colorEnd: eqStyle.colorEnd });
+    renderColorBookmarks();
+  });
+  renderColorBookmarks();
   eqBarCountInput.addEventListener('input', function(){
     eqStyle.barCount = parseInt(eqBarCountInput.value, 10);
   });
@@ -7135,6 +7464,41 @@ export function createThreeEq(){
   eqPosYSelect.addEventListener('change', function(){ eqStyle.posY = eqPosYSelect.value; });
   eqWidthInput.addEventListener('input', function(){ eqStyle.width = parseInt(eqWidthInput.value, 10); });
   eqHeightInput.addEventListener('input', function(){ eqStyle.height = parseInt(eqHeightInput.value, 10); });
+
+  function renderEqBookmarks(){
+    const list = loadBookmarks('eq');
+    eqBookmarkList.innerHTML = '';
+    list.forEach(function(bm, idx){
+      const chip = document.createElement('span');
+      chip.className = 'bookmark-chip';
+      const apply = document.createElement('button');
+      apply.type = 'button';
+      apply.className = 'bookmark-chip-apply';
+      apply.textContent = bm.name;
+      apply.title = 'クリックして適用';
+      apply.addEventListener('click', function(){ setEqStyle(sanitizeEqStyle(bm.data)); });
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'bookmark-chip-del';
+      del.textContent = '×';
+      del.title = 'ブックマークを削除';
+      del.addEventListener('click', function(e){
+        e.stopPropagation();
+        deleteBookmark('eq', idx);
+        renderEqBookmarks();
+      });
+      chip.appendChild(apply);
+      chip.appendChild(del);
+      eqBookmarkList.appendChild(chip);
+    });
+  }
+  eqBookmarkAddBtn.addEventListener('click', function(){
+    const name = promptBookmarkName();
+    if(!name) return;
+    addBookmark('eq', name, sanitizeEqStyle(eqStyle));
+    renderEqBookmarks();
+  });
+  renderEqBookmarks();
 
   /* ---------- EQ style: mood auto-generation ---------- */
   const MOOD_PRESETS = [
@@ -7545,7 +7909,7 @@ export function createThreeEq(){
       posY: ['top','center','bottom'].indexOf(obj.posY) !== -1 ? obj.posY : 'center',
       width: clamp(parseInt(obj.width, 10) || 100, 10, 100),
       height: clamp(parseInt(obj.height, 10) || 100, 10, 100),
-      sensitivity: clamp(isNaN(parseFloat(obj.sensitivity)) ? 1.5 : parseFloat(obj.sensitivity), 0.5, 3),
+      sensitivity: clamp(isNaN(parseFloat(obj.sensitivity)) ? 1.5 : parseFloat(obj.sensitivity), 0.05, 3),
       opacity: clamp(isNaN(parseFloat(obj.opacity)) ? 1 : parseFloat(obj.opacity), 0.1, 1)
     };
   }
@@ -7559,6 +7923,30 @@ export function createThreeEq(){
     return clamp(num, isNaN(min) ? -Infinity : min, isNaN(max) ? Infinity : max);
   }
 
+  function getFontSettings(){
+    return {
+      family: previewFontFamilySelect.value,
+      customFontName: customFontNameInput.value,
+      size: previewFontSizeSelect.value,
+      customSizeSingle: customFontSizeSingleInput.value,
+      customSizeAll: customFontSizeAllInput.value,
+      weight: fontWeightSelect.value,
+      italic: fontItalicToggle.classList.contains('active'),
+      letterSpacing: fontLetterSpacingInput.value,
+      lineHeight: fontLineHeightInput.value,
+      strokeWidth: fontStrokeWidthInput.value,
+      strokeColor: fontStrokeColorInput.value,
+      shadowColor: fontShadowColorInput.value,
+      shadowStrength: fontShadowStrengthInput.value,
+      textPosX: textPosXNumber.value,
+      textPosY: textPosYNumber.value,
+      transitionEffect: lineTransitionSelect.value,
+      transitionInDuration: transitionInDurationInput.value,
+      transitionOutDuration: transitionOutDurationInput.value,
+      lyricsOffset: lyricsOffsetNumber.value
+    };
+  }
+
   function getFullPreviewSettings(){
     let ratio = 'free';
     if(previewStage.classList.contains('ratio-vertical')) ratio = 'vertical';
@@ -7568,50 +7956,24 @@ export function createThreeEq(){
       version: 1,
       previewMode: previewMode,
       previewRatio: ratio,
-      font: {
-        family: previewFontFamilySelect.value,
-        customFontName: customFontNameInput.value,
-        size: previewFontSizeSelect.value,
-        customSizeSingle: customFontSizeSingleInput.value,
-        customSizeAll: customFontSizeAllInput.value,
-        weight: fontWeightSelect.value,
-        italic: fontItalicToggle.classList.contains('active'),
-        letterSpacing: fontLetterSpacingInput.value,
-        lineHeight: fontLineHeightInput.value,
-        strokeWidth: fontStrokeWidthInput.value,
-        strokeColor: fontStrokeColorInput.value,
-        shadowColor: fontShadowColorInput.value,
-        shadowStrength: fontShadowStrengthInput.value,
-        textPosX: textPosXNumber.value,
-        textPosY: textPosYNumber.value,
-        transitionEffect: lineTransitionSelect.value,
-        transitionInDuration: transitionInDurationInput.value,
-        transitionOutDuration: transitionOutDurationInput.value,
-        lyricsOffset: lyricsOffsetNumber.value
-      },
+      font: getFontSettings(),
       background: {
         sizeMode: bgSizeModeSelect.value,
         zoom: bgZoomInput.value,
         posX: bgPosXInput.value,
         posY: bgPosYInput.value,
         loopEffect: bgLoopEffectSelect.value,
-        loopFadeDuration: bgLoopFadeDurationInput.value
+        loopFadeDuration: bgLoopFadeDurationInput.value,
+        opacity: bgOpacityInput.value,
+        visible: bgVisible
       },
       highlightMode: previewAll.classList.contains('highlight-text-only') ? 'text' : 'line',
       eq: eqStyle
     };
   }
 
-  function applyFullPreviewSettings(obj){
-    obj = obj || {};
-
-    if(obj.previewMode === 'all') previewModeAllBtn.click();
-    else if(obj.previewMode === 'single') previewModeSingleBtn.click();
-
-    const ratioBtnMap = { free: previewRatioFreeBtn, vertical: previewRatioVerticalBtn, horizontal: previewRatioHorizontalBtn };
-    if(ratioBtnMap[obj.previewRatio]) ratioBtnMap[obj.previewRatio].click();
-
-    const font = obj.font || {};
+  function applyFontSettings(font){
+    font = font || {};
     const familyOptionExists = Array.prototype.some.call(previewFontFamilySelect.options, function(o){ return o.value === font.family; });
     if(typeof font.customFontName === 'string') customFontNameInput.value = font.customFontName;
     if(familyOptionExists){
@@ -7653,6 +8015,54 @@ export function createThreeEq(){
       lyricsOffsetNumber.value = clampInputValue(lyricsOffsetNumber, font.lyricsOffset, lyricsOffsetNumber.value);
       lyricsOffsetRange.value = lyricsOffsetNumber.value;
     }
+    applyPreviewStyle();
+  }
+
+  function renderFontBookmarks(){
+    const list = loadBookmarks('font');
+    fontBookmarkList.innerHTML = '';
+    list.forEach(function(bm, idx){
+      const chip = document.createElement('span');
+      chip.className = 'bookmark-chip';
+      const apply = document.createElement('button');
+      apply.type = 'button';
+      apply.className = 'bookmark-chip-apply';
+      apply.textContent = bm.name;
+      apply.title = 'クリックして適用';
+      apply.addEventListener('click', function(){ applyFontSettings(bm.data); });
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'bookmark-chip-del';
+      del.textContent = '×';
+      del.title = 'ブックマークを削除';
+      del.addEventListener('click', function(e){
+        e.stopPropagation();
+        deleteBookmark('font', idx);
+        renderFontBookmarks();
+      });
+      chip.appendChild(apply);
+      chip.appendChild(del);
+      fontBookmarkList.appendChild(chip);
+    });
+  }
+  fontBookmarkAddBtn.addEventListener('click', function(){
+    const name = promptBookmarkName();
+    if(!name) return;
+    addBookmark('font', name, getFontSettings());
+    renderFontBookmarks();
+  });
+  renderFontBookmarks();
+
+  function applyFullPreviewSettings(obj){
+    obj = obj || {};
+
+    if(obj.previewMode === 'all') previewModeAllBtn.click();
+    else if(obj.previewMode === 'single') previewModeSingleBtn.click();
+
+    const ratioBtnMap = { free: previewRatioFreeBtn, vertical: previewRatioVerticalBtn, horizontal: previewRatioHorizontalBtn };
+    if(ratioBtnMap[obj.previewRatio]) ratioBtnMap[obj.previewRatio].click();
+
+    applyFontSettings(obj.font);
 
     if(obj.highlightMode === 'text') highlightModeTextBtn.click();
     else if(obj.highlightMode === 'line') highlightModeLineBtn.click();
@@ -7665,9 +8075,11 @@ export function createThreeEq(){
     if(bgModeOptionExists) bgSizeModeSelect.value = bg.sizeMode;
     if(['none','fade'].indexOf(bg.loopEffect) !== -1) bgLoopEffectSelect.value = bg.loopEffect;
     if(typeof bg.loopFadeDuration !== 'undefined') bgLoopFadeDurationInput.value = clampInputValue(bgLoopFadeDurationInput, bg.loopFadeDuration, bgLoopFadeDurationInput.value);
+    if(typeof bg.opacity !== 'undefined') bgOpacityInput.value = clampInputValue(bgOpacityInput, bg.opacity, bgOpacityInput.value);
+    applyBgOpacity();
+    bgVisible = typeof bg.visible === 'boolean' ? bg.visible : true;
+    applyBgVisibility();
     applyBgTransform();
-
-    applyPreviewStyle();
 
     setEqStyle(sanitizeEqStyle(obj.eq));
   }
@@ -7773,6 +8185,7 @@ export function createThreeEq(){
   }
 
   function getBgDrawSource(){
+    if(!bgVisible) return null;
     if(currentBgKind === 'video'){
       const v = previewBgVideo;
       if(v.readyState >= 2 && v.videoWidth) return { el: v, w: v.videoWidth, h: v.videoHeight };
@@ -7815,7 +8228,7 @@ export function createThreeEq(){
       scale
     );
     const prevAlpha = ctx.globalAlpha;
-    ctx.globalAlpha = prevAlpha * getBgVideoLoopAlpha();
+    ctx.globalAlpha = prevAlpha * getBgVideoLoopAlpha() * parseFloat(bgOpacityInput.value);
     ctx.drawImage(source.el, rect.x, rect.y, rect.w, rect.h);
     ctx.globalAlpha = prevAlpha;
     if(previewBg.classList.contains('has-image')){
@@ -8583,6 +8996,18 @@ export function createThreeEq(){
         }
       });
       startRow.appendChild(prevSyncBtn);
+      const nowStartBtn = document.createElement('button');
+      nowStartBtn.className = 'rowbtn';
+      nowStartBtn.textContent = '⏱';
+      nowStartBtn.title = '現在の再生位置を開始時間にセット';
+      if(line.isMeta || line.isBlank) nowStartBtn.disabled = true;
+      nowStartBtn.addEventListener('click', function(){
+        if(!audioEl.src){ setStatus('先に音源ファイルを開いてください', 'err'); return; }
+        line.start = audioEl.currentTime;
+        renderTable();
+        setStatus((i+1) + '行目: 開始時間に現在の再生位置をセットしました', 'ok');
+      });
+      startRow.appendChild(nowStartBtn);
       startRow.appendChild(makeTimeInput(line, 'start'));
       tdStart.appendChild(startRow);
       tr.appendChild(tdStart);
@@ -8593,6 +9018,18 @@ export function createThreeEq(){
       const endRow = document.createElement('div');
       endRow.className = 'time-cell-row';
       endRow.appendChild(makeTimeInput(line, 'end'));
+      const nowEndBtn = document.createElement('button');
+      nowEndBtn.className = 'rowbtn';
+      nowEndBtn.textContent = '⏱';
+      nowEndBtn.title = '現在の再生位置を終了時間にセット';
+      if(line.isMeta || line.isBlank) nowEndBtn.disabled = true;
+      nowEndBtn.addEventListener('click', function(){
+        if(!audioEl.src){ setStatus('先に音源ファイルを開いてください', 'err'); return; }
+        line.end = audioEl.currentTime;
+        renderTable();
+        setStatus((i+1) + '行目: 終了時間に現在の再生位置をセットしました', 'ok');
+      });
+      endRow.appendChild(nowEndBtn);
       const syncBtn = document.createElement('button');
       syncBtn.className = 'rowbtn';
       syncBtn.textContent = '⇥';
@@ -9444,6 +9881,7 @@ export function createThreeEq(){
       }
       previewBg.classList.add('has-image');
       previewBgClearBtn.disabled = false;
+      previewBgVisibleToggle.disabled = false;
     }
 
     applyFullPreviewSettings(record.previewSettings || DEFAULT_PREVIEW_SETTINGS);
