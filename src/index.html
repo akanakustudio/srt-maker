@@ -860,6 +860,8 @@
                 <option value="rays">スターバースト</option>
                 <option value="neongrid">ネオングリッド</option>
                 <option value="glitchblocks">グリッチブロック</option>
+                <option value="flamebars">フレイムバー</option>
+                <option value="flowglow">フローグロー</option>
               </optgroup>
               <optgroup label="サークル・シンメトリー">
                 <option value="circular">サークル</option>
@@ -872,11 +874,16 @@
               <optgroup label="おしゃれ・都会的">
                 <option value="smoothline">スムースライン</option>
                 <option value="liquidblob">リキッドブロブ</option>
+                <option value="ribbonwave">リボンウェーブ</option>
+                <option value="gradientwave">グラデーションウェーブ</option>
               </optgroup>
               <optgroup label="アコースティック・チル">
                 <option value="particles">パーティクル</option>
                 <option value="orb">ブリージングオーブ</option>
                 <option value="vumeter">VUメーター</option>
+              </optgroup>
+              <optgroup label="テック・ネットワーク">
+                <option value="plexus">プレクサス</option>
               </optgroup>
               <optgroup label="その他">
                 <option value="dots">ドット</option>
@@ -1688,7 +1695,7 @@
   let eqEnabled = false;
   let eqRAF = null;
 
-  const EQ_TYPES = ['bars', 'mirror', 'wave', 'circular', 'dots', 'led', 'radialDots', 'polygon', 'rays', 'ripple', 'particles', 'orb', 'smoothline', 'auraring', 'neongrid', 'liquidblob', 'vumeter', 'ringpulse', 'petalring', 'glitchblocks', 'oscilloscope'];
+  const EQ_TYPES = ['bars', 'mirror', 'wave', 'circular', 'dots', 'led', 'radialDots', 'polygon', 'rays', 'ripple', 'particles', 'orb', 'smoothline', 'auraring', 'neongrid', 'liquidblob', 'vumeter', 'ringpulse', 'petalring', 'glitchblocks', 'plexus', 'ribbonwave', 'flowglow', 'flamebars', 'gradientwave', 'oscilloscope'];
   let eqStyle = {
     type: 'bars',
     colorStart: '#7fe9db',
@@ -2405,6 +2412,164 @@
     }
   }
 
+  // Plexus/network of connected points, brighter and more tightly linked near
+  // energetic bands - suits tech/corporate/data-driven visuals.
+  function drawEqPlexus(ctx, w, h){
+    const barCount = Math.min(28, eqStyle.barCount);
+    const values = getBarValues(barCount);
+    const cols = Math.max(2, Math.ceil(Math.sqrt(barCount * (w / h))));
+    const rows = Math.max(2, Math.ceil(barCount / cols));
+    const points = [];
+    const now = performance.now();
+    for(let r = 0; r < rows; r++){
+      for(let c = 0; c < cols; c++){
+        const idx = Math.min(barCount - 1, Math.floor(((r * cols + c) / (rows * cols)) * barCount));
+        const energy = values[idx] || 0;
+        const jitter = Math.sin(r * 13 + c * 7 + now / 2000) * 0.5 + 0.5;
+        const x = (c + 0.5) / cols * w + (jitter - 0.5) * (w / cols) * 0.6;
+        const y = (r + 0.5) / rows * h + (jitter - 0.5) * (h / rows) * 0.6;
+        points.push({ x: x, y: y, energy: energy });
+      }
+    }
+    const maxDist = Math.min(w, h) * 0.22;
+    ctx.lineWidth = 1;
+    for(let i = 0; i < points.length; i++){
+      for(let j = i + 1; j < points.length; j++){
+        const dx = points[i].x - points[j].x, dy = points[i].y - points[j].y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if(dist < maxDist){
+          const alpha = (1 - dist / maxDist) * 0.35 * (0.3 + Math.max(points[i].energy, points[j].energy));
+          ctx.strokeStyle = hexToRgba(eqStyle.colorStart, alpha);
+          ctx.beginPath();
+          ctx.moveTo(points[i].x, points[i].y);
+          ctx.lineTo(points[j].x, points[j].y);
+          ctx.stroke();
+        }
+      }
+    }
+    points.forEach(function(p){
+      const r = 1.5 + p.energy * 4;
+      ctx.fillStyle = hexToRgba(p.energy > 0.5 ? eqStyle.colorStart : eqStyle.colorEnd, 0.5 + p.energy * 0.5);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
+  // Stacked wavy "ribbon" strands with a left-to-right gradient, suggesting
+  // a corrugated 3D surface - suits stylish/urban tracks.
+  function drawEqRibbonWave(ctx, w, h){
+    const barCount = Math.max(24, eqStyle.barCount);
+    const values = getBarValues(barCount);
+    const lineCount = 14;
+    const stepX = w / ((barCount - 1) || 1);
+    const now = performance.now();
+    for(let li = 0; li < lineCount; li++){
+      const ty = (li + 0.5) / lineCount;
+      const baseY = ty * h;
+      const ampScale = 1 - Math.abs(ty - 0.5) * 1.1;
+      ctx.beginPath();
+      for(let i = 0; i < barCount; i++){
+        const x = i * stepX;
+        const wobble = Math.sin(i * 0.5 + li * 0.7 + now / 900) * h * 0.01;
+        const y = baseY + wobble - values[i] * h * 0.16 * ampScale * Math.sin(li * 0.9 + 1);
+        if(i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      const grad = ctx.createLinearGradient(0, 0, w, 0);
+      grad.addColorStop(0, hexToRgba(eqStyle.colorStart, 0.8));
+      grad.addColorStop(1, hexToRgba(eqStyle.colorEnd, 0.8));
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = Math.max(1.5, h * 0.012);
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    }
+  }
+
+  // Multiple thin glowing flowing strands drifting out of phase with each
+  // other - suits dance/EDM tracks going for a "light trail" look.
+  function drawEqFlowGlow(ctx, w, h){
+    const barCount = Math.max(20, eqStyle.barCount);
+    const values = getBarValues(barCount);
+    const strandCount = 5;
+    const stepX = w / ((barCount - 1) || 1);
+    const now = performance.now();
+    for(let s = 0; s < strandCount; s++){
+      const phase = s * 1.3;
+      const freqMul = 1 + s * 0.15;
+      ctx.beginPath();
+      for(let i = 0; i < barCount; i++){
+        const x = i * stepX;
+        const t = i / barCount;
+        const wob = Math.sin(t * Math.PI * 4 * freqMul + now / 700 + phase);
+        const y = h / 2 + wob * values[i] * h * 0.34 * (1 - s * 0.12);
+        if(i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = hexToRgba(s % 2 === 0 ? eqStyle.colorStart : eqStyle.colorEnd, 0.55 - s * 0.06);
+      ctx.lineWidth = Math.max(1, h * 0.006);
+      ctx.stroke();
+    }
+  }
+
+  // Bars with a flickering flame cap and a faded floor reflection - suits
+  // energetic live/club visuals.
+  function drawEqFlameBars(ctx, w, h){
+    const barCount = eqStyle.barCount;
+    const values = getBarValues(barCount);
+    const barWidth = w / barCount;
+    const floorY = h * 0.72;
+    const now = performance.now();
+    for(let i = 0; i < barCount; i++){
+      const barHeight = values[i] * floorY * 0.85;
+      const x = i * barWidth;
+      const topY = floorY - barHeight;
+      const grad = ctx.createLinearGradient(0, topY, 0, floorY);
+      grad.addColorStop(0, hexToRgba(eqStyle.colorStart, 0.95));
+      grad.addColorStop(1, hexToRgba(eqStyle.colorEnd, 0.5));
+      ctx.fillStyle = grad;
+      ctx.fillRect(x + 1, topY, Math.max(1, barWidth - 2), barHeight);
+      const flicker = Math.sin(now / 150 + i) * 0.5 + 0.5;
+      ctx.fillStyle = hexToRgba('#ffd23d', 0.35 * flicker * values[i]);
+      ctx.beginPath();
+      ctx.moveTo(x + 1, topY);
+      ctx.quadraticCurveTo(x + barWidth / 2, topY - barWidth * 1.2 * flicker * values[i], x + barWidth - 1, topY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.save();
+      ctx.globalAlpha = 0.22;
+      ctx.translate(0, floorY * 2);
+      ctx.scale(1, -1);
+      ctx.fillStyle = grad;
+      ctx.fillRect(x + 1, topY, Math.max(1, barWidth - 2), barHeight);
+      ctx.restore();
+    }
+    ctx.strokeStyle = hexToRgba(eqStyle.colorStart, 0.3);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, floorY);
+    ctx.lineTo(w, floorY);
+    ctx.stroke();
+  }
+
+  // Mirrored waveform bars colored with a rich multi-stop rainbow gradient
+  // across the X axis instead of a 2-color vertical gradient.
+  function drawEqGradientWave(ctx, w, h){
+    const barCount = eqStyle.barCount;
+    const values = getBarValues(barCount);
+    const barWidth = w / barCount;
+    const grad = ctx.createLinearGradient(0, 0, w, 0);
+    grad.addColorStop(0, eqStyle.colorStart);
+    grad.addColorStop(0.35, '#ff3d9a');
+    grad.addColorStop(0.65, '#ffd23d');
+    grad.addColorStop(1, eqStyle.colorEnd);
+    ctx.fillStyle = grad;
+    const mid = h / 2;
+    for(let i = 0; i < barCount; i++){
+      const barHeight = values[i] * mid * 0.9;
+      const x = i * barWidth;
+      ctx.fillRect(x + 1, mid - barHeight, Math.max(1, barWidth - 2), barHeight * 2);
+    }
+  }
+
   function drawEqOscilloscope(ctx, w, h){
     const data = eqTimeDataArray;
     const len = data.length;
@@ -2461,6 +2626,11 @@
         case 'ringpulse': drawEqRingPulse(ctx, rect.w, rect.h); break;
         case 'petalring': drawEqPetalRing(ctx, rect.w, rect.h); break;
         case 'glitchblocks': drawEqGlitchBlocks(ctx, rect.w, rect.h); break;
+        case 'plexus': drawEqPlexus(ctx, rect.w, rect.h); break;
+        case 'ribbonwave': drawEqRibbonWave(ctx, rect.w, rect.h); break;
+        case 'flowglow': drawEqFlowGlow(ctx, rect.w, rect.h); break;
+        case 'flamebars': drawEqFlameBars(ctx, rect.w, rect.h); break;
+        case 'gradientwave': drawEqGradientWave(ctx, rect.w, rect.h); break;
         default: drawEqBars(ctx, rect.w, rect.h);
       }
     }
@@ -3436,6 +3606,11 @@
           case 'ringpulse': drawEqRingPulse(recordCtx, rect.w, rect.h); break;
           case 'petalring': drawEqPetalRing(recordCtx, rect.w, rect.h); break;
           case 'glitchblocks': drawEqGlitchBlocks(recordCtx, rect.w, rect.h); break;
+          case 'plexus': drawEqPlexus(recordCtx, rect.w, rect.h); break;
+          case 'ribbonwave': drawEqRibbonWave(recordCtx, rect.w, rect.h); break;
+          case 'flowglow': drawEqFlowGlow(recordCtx, rect.w, rect.h); break;
+          case 'flamebars': drawEqFlameBars(recordCtx, rect.w, rect.h); break;
+          case 'gradientwave': drawEqGradientWave(recordCtx, rect.w, rect.h); break;
           default: drawEqBars(recordCtx, rect.w, rect.h);
         }
       }
