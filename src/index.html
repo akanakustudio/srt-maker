@@ -78,6 +78,7 @@
   }
   .playbtn:hover{border-color:var(--accent-dim);}
   .playbtn svg{width:15px;height:15px;}
+  .seek-wrap{position:relative;flex:1;display:flex;align-items:center;}
   input[type=range]#seek{
     flex:1;height:4px;-webkit-appearance:none;appearance:none;background:var(--line);border-radius:2px;outline:none;
   }
@@ -86,6 +87,17 @@
     box-shadow:0 0 0 3px rgba(51,214,192,.15);
   }
   input[type=range]#seek::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:var(--accent);border:none;cursor:pointer;}
+  .seek-tooltip{
+    position:absolute;bottom:100%;left:0;margin-bottom:9px;transform:translateX(-50%);
+    background:#0d0f13;border:1px solid var(--line);color:var(--text);
+    font-family:var(--mono);font-size:11px;padding:3px 7px;border-radius:6px;
+    white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .1s ease;z-index:5;
+  }
+  .seek-tooltip.visible{opacity:1;}
+  .seek-tooltip::after{
+    content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);
+    border:5px solid transparent;border-top-color:var(--line);
+  }
   .timecode{font-family:var(--mono);font-size:12px;color:var(--muted);flex:none;min-width:96px;text-align:right;}
 
   .transport-controls{
@@ -186,9 +198,9 @@
   td.idx{color:var(--muted2);font-family:var(--mono);font-size:11px;width:34px;text-align:right;cursor:pointer;}
   td.sel{width:28px;text-align:center;}
   td.time{width:154px;}
-  td.time.start{width:182px;white-space:nowrap;}
+  td.time.start{width:212px;white-space:nowrap;}
   td.time.end{width:182px;}
-  td.actions{width:108px;white-space:nowrap;}
+  td.actions{width:80px;white-space:nowrap;}
 
   /* Single flex row so the prev/next-line sync button and the time-input
      (itself a flex row with its own stepper) sit on one line instead of the
@@ -240,6 +252,17 @@
 
   .empty-state{padding:40px 20px;text-align:center;color:var(--muted2);font-size:13px;line-height:1.8;}
 
+  .lyrics-text-editor{display:flex;flex-direction:column;gap:8px;}
+  .lyrics-text-editor .hint{font-size:11.5px;color:var(--muted2);line-height:1.6;}
+  #lyricsTextArea{
+    width:100%;height:56vh;min-height:220px;resize:vertical;
+    background:var(--panel2);border:1px solid var(--line);color:var(--text);
+    font-family:var(--mono);font-size:12.5px;line-height:1.7;
+    border-radius:10px;padding:12px 14px;
+  }
+  #lyricsTextArea:focus{outline:none;border-color:var(--accent-dim);}
+  .lyrics-text-editor-actions{display:flex;justify-content:flex-end;gap:10px;}
+
   /* ---------- Lyrics preview ---------- */
   .preview-panel{
     border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden;
@@ -270,11 +293,11 @@
   .toggle-btn.active{background:var(--accent-dim);border-color:var(--accent);color:#eafffb;}
 
   .style-io-controls{
-    display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px 0;
+    display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px;
   }
   .style-io-controls .hint{font-size:11px;color:var(--muted2);}
 
-  .preview-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px 0;}
+  .preview-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px;}
   .preview-control{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);}
   .preview-control select{
     background:var(--panel2);border:1px solid var(--line);color:var(--text);
@@ -298,25 +321,42 @@
   .preview-control input[type=number]:focus{outline:none;border-color:var(--accent-dim);}
 
   .bg-controls{
-    display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px 4px;
-    border-top:1px dashed var(--line);margin-top:10px;
+    display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px;
   }
 
   .font-style-controls{
-    display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px 4px;
-    border-top:1px dashed var(--line);margin-top:10px;
+    display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px;
+    border-top:1px dashed var(--line);
   }
 
   .eq-controls{
-    display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px 4px;
-    border-top:1px dashed var(--line);margin-top:10px;
+    display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px;
   }
 
   .export-controls{
     display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px;
-    border-top:1px dashed var(--line);margin-top:10px;
   }
   .export-controls .hint{font-size:11.5px;color:var(--muted2);}
+
+  /* Collapsible parameter panels - each control group (font/background/EQ/
+     export/etc.) is a <details> so it can be folded away, and the actual
+     visual preview stage now sits above all of them in source order instead
+     of below, so it's reachable without scrolling past every control group. */
+  .param-section{
+    border:1px solid var(--line);border-radius:10px;background:var(--panel2);
+    margin-top:10px;overflow:hidden;
+  }
+  .param-section > summary{
+    list-style:none;cursor:pointer;user-select:none;-webkit-user-select:none;
+    padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;
+    font-size:12.5px;color:var(--muted);font-weight:600;letter-spacing:.02em;
+  }
+  .param-section > summary::-webkit-details-marker{display:none;}
+  .param-section > summary::marker{content:none;}
+  .param-section > summary:hover{color:var(--text);}
+  .param-section > summary .chev{width:14px;height:14px;flex:none;transition:transform .15s ease;opacity:.7;}
+  .param-section[open] > summary .chev{transform:rotate(90deg);}
+  .param-section > summary + *{border-top:1px solid var(--line);}
   #recordVideoBtn.active{background:var(--rec-dim);border-color:var(--rec);color:#ffe3d9;}
 
   .preview-stage-outer.has-ratio{
@@ -345,6 +385,59 @@
   .preview-stage-outer .preview-stage.ratio-horizontal{
     aspect-ratio:16/9;width:100%;max-width:720px;height:auto;
   }
+
+  /* ---------- Preview popup (floating, freely resizable) ---------- */
+  /* The actual .preview-stage-outer node is moved here (not cloned) while the
+     popup is open, so the live canvas/video keep rendering with no
+     duplicated state; see openPreviewPopup()/closePreviewPopup(). */
+  .preview-popup{
+    position:fixed;top:88px;right:24px;width:420px;height:340px;
+    min-width:260px;min-height:200px;resize:both;overflow:hidden;
+    background:#0d0f13;border:1px solid var(--line);border-radius:12px;
+    box-shadow:0 20px 60px rgba(0,0,0,.55);z-index:80;
+    display:flex;flex-direction:column;
+  }
+  .preview-popup-head{
+    display:flex;align-items:center;justify-content:space-between;padding:8px 10px;
+    background:var(--panel2);border-bottom:1px solid var(--line);cursor:move;
+    flex:none;user-select:none;-webkit-user-select:none;touch-action:none;
+  }
+  .preview-popup-title{font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.03em;}
+  .preview-popup-actions{display:flex;gap:6px;}
+  .preview-popup-btn{
+    width:22px;height:22px;border-radius:6px;border:1px solid var(--line);background:var(--panel);
+    color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;
+    font-size:13px;line-height:1;padding:0;
+  }
+  .preview-popup-btn:hover{border-color:var(--accent-dim);color:var(--text);}
+  .preview-popup-body{flex:1;min-height:0;position:relative;overflow:hidden;}
+  .preview-popup-body .preview-stage-outer{height:100%;padding:0;background:none;display:block;}
+  .preview-popup-body .preview-stage{
+    height:100%!important;width:100%!important;max-width:none!important;
+    aspect-ratio:auto!important;resize:none!important;border-radius:0;
+  }
+
+  /* ---------- Preview fullscreen ---------- */
+  /* Fills as much of the screen as possible while respecting whichever
+     aspect ratio mode (縦動画/横動画/自由) is currently selected, instead of
+     the normal in-page height/width caps meant for the small inline preview. */
+  .preview-stage-outer:fullscreen,
+  .preview-stage-outer:-webkit-full-screen{
+    display:flex;align-items:center;justify-content:center;padding:0;background:#000;
+  }
+  .preview-stage-outer:fullscreen .preview-stage.ratio-vertical,
+  .preview-stage-outer:-webkit-full-screen .preview-stage.ratio-vertical{
+    height:100vh!important;width:auto!important;max-width:100vw!important;
+  }
+  .preview-stage-outer:fullscreen .preview-stage.ratio-horizontal,
+  .preview-stage-outer:-webkit-full-screen .preview-stage.ratio-horizontal{
+    width:100vw!important;height:auto!important;max-height:100vh!important;max-width:none!important;
+  }
+  .preview-stage-outer:fullscreen .preview-stage:not(.ratio-vertical):not(.ratio-horizontal),
+  .preview-stage-outer:-webkit-full-screen .preview-stage:not(.ratio-vertical):not(.ratio-horizontal){
+    width:100vw!important;height:100vh!important;resize:none!important;
+  }
+
   .preview-bg{
     position:absolute;inset:0;z-index:0;
     background-image:radial-gradient(ellipse at center, #1c2129, #14171c 80%);
@@ -370,12 +463,12 @@
     left:var(--preview-text-x, 50%);top:var(--preview-text-y, 50%);
     max-width:calc(100% - 40px);
     font-family:var(--preview-font-family);
-    font-size:var(--preview-single-size);font-weight:var(--preview-font-weight);
+    font-size:calc(var(--preview-single-size) * var(--preview-scale, 1));font-weight:var(--preview-font-weight);
     font-style:var(--preview-font-style);
     text-align:center;color:var(--text);
     line-height:var(--preview-line-height);letter-spacing:var(--preview-letter-spacing);
-    text-shadow:0 0 var(--preview-shadow-blur) var(--preview-shadow-color);
-    -webkit-text-stroke:var(--preview-stroke-width) var(--preview-stroke-color);
+    text-shadow:0 0 calc(var(--preview-shadow-blur) * var(--preview-scale, 1)) var(--preview-shadow-color);
+    -webkit-text-stroke:calc(var(--preview-stroke-width) * var(--preview-scale, 1)) var(--preview-stroke-color);
     word-break:break-word;
     transition:opacity var(--preview-transition-duration, .22s) ease, transform var(--preview-transition-duration, .22s) ease;
     opacity:1;transform:translate(-50%,-50%);
@@ -388,21 +481,31 @@
     color:var(--muted2);font-size:15px;font-weight:400;font-style:normal;
     text-shadow:none;-webkit-text-stroke:0 transparent;
   }
+  html.text-mask-enabled .preview-single-text:not(.is-empty){
+    background:var(--preview-mask-color);
+    padding:calc(var(--preview-mask-padding) * var(--preview-scale, 1)) calc(var(--preview-mask-padding) * var(--preview-scale, 1) * 1.6);
+    border-radius:calc(var(--preview-mask-radius) * var(--preview-scale, 1));
+  }
+  html.text-mask-enabled .preview-all .preview-line:not(.active){
+    background:var(--preview-mask-color);
+    border-radius:calc(var(--preview-mask-radius) * var(--preview-scale, 1));
+  }
 
   .preview-all{position:relative;z-index:2;height:100%;overflow-y:auto;padding:18px 16px;background:transparent;}
   .preview-line{
     font-family:var(--preview-font-family);
     font-weight:var(--preview-font-weight);font-style:var(--preview-font-style);
     letter-spacing:var(--preview-letter-spacing);
-    padding:7px 10px;font-size:var(--preview-all-size);color:var(--muted);text-align:center;border-radius:6px;
+    padding:7px 10px;font-size:calc(var(--preview-all-size) * var(--preview-scale, 1));color:var(--muted);text-align:center;border-radius:6px;
     transition:color .15s, background .15s;line-height:var(--preview-line-height);
-    text-shadow:0 1px 6px rgba(0,0,0,.5), 0 0 var(--preview-shadow-blur) var(--preview-shadow-color);
-    -webkit-text-stroke:calc(var(--preview-stroke-width) * 0.6) var(--preview-stroke-color);
+    text-shadow:0 1px 6px rgba(0,0,0,.5), 0 0 calc(var(--preview-shadow-blur) * var(--preview-scale, 1)) var(--preview-shadow-color);
+    -webkit-text-stroke:calc(var(--preview-stroke-width) * var(--preview-scale, 1) * 0.6) var(--preview-stroke-color);
   }
   .preview-line.meta{color:var(--meta);font-size:11.5px;font-style:italic;margin-top:8px;}
   .preview-line.active{color:var(--accent);background:rgba(51,214,192,.1);}
   .preview-all.highlight-text-only .preview-line.active{background:transparent;}
   .preview-empty{text-align:center;color:var(--muted2);font-size:13px;padding:20px;}
+  .preview-all-spacer{height:50%;flex:none;}
 
   /* ---------- Footer ---------- */
   footer{
@@ -425,6 +528,7 @@
     padding:12px 16px;font-size:13px;cursor:pointer;
   }
   .ghost-btn:hover{border-color:var(--accent-dim);color:var(--text);}
+  .ghost-btn.active{background:var(--accent-dim);border-color:var(--accent);color:#eafffb;}
 
   /* ---------- Tablet ---------- */
   @media (min-width:641px) and (max-width:1179px){
@@ -445,9 +549,9 @@
     table{font-size:12px;}
     input.time-input{width:86px;font-size:11.5px;}
     td.time{width:126px;}
-    td.time.start{width:154px;}
+    td.time.start{width:184px;}
     td.time.end{width:154px;}
-    td.actions{width:84px;}
+    td.actions{width:64px;}
     .lyrics-wrap{height:48vh;}
     footer{padding:10px 12px;}
     .status{width:100%;order:2;margin-right:0;}
@@ -498,7 +602,10 @@
       <button class="playbtn" id="playBtn" title="再生 / 一時停止">
         <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
       </button>
-      <input type="range" id="seek" min="0" max="0" step="0.001" value="0" disabled>
+      <div class="seek-wrap" id="seekWrap">
+        <input type="range" id="seek" min="0" max="0" step="0.001" value="0" disabled>
+        <div class="seek-tooltip" id="seekTooltip"></div>
+      </div>
       <span class="timecode" id="timeDisplay">00:00.000 / 00:00.000</span>
     </div>
     <div class="transport-controls">
@@ -539,240 +646,11 @@
             <button class="toggle-btn active" type="button" id="highlightModeLine" data-highlight="line">行全体をハイライト</button>
             <button class="toggle-btn" type="button" id="highlightModeText" data-highlight="text">文字のみハイライト</button>
           </div>
+          <div class="preview-toggle">
+            <button class="toggle-btn" type="button" id="previewPopupBtn" title="プレビューをフローティングウィンドウとして表示し、自由な位置・サイズで作業しながら確認できます">ポップアップ表示</button>
+            <button class="toggle-btn" type="button" id="previewFullscreenBtn" title="プレビューを全画面表示します">全画面表示</button>
+          </div>
         </div>
-      </div>
-      <div class="style-io-controls" id="styleIoControls">
-        <button class="toggle-btn" type="button" id="previewStyleSaveBtn">プレビュー設定を保存</button>
-        <label class="toggle-btn" for="previewStyleLoadInput">プレビュー設定を読み込み</label>
-        <input type="file" id="previewStyleLoadInput" accept=".json,application/json" style="display:none">
-        <span class="hint">フォント・背景・グラフィックイコライザーなど、歌詞プレビューの設定一式を保存/読み込みします（背景の画像・動画そのものは含みません）</span>
-      </div>
-      <div class="preview-controls">
-        <label class="preview-control">
-          <span>フォント</span>
-          <select id="previewFontFamily"></select>
-        </label>
-        <label class="preview-control" id="customFontRow" style="display:none">
-          <input type="text" id="customFontNameInput" placeholder="Google Fontsのフォント名（例: Zen Kaku Gothic New）">
-          <button class="toggle-btn" type="button" id="customFontApplyBtn">適用</button>
-        </label>
-        <label class="preview-control">
-          <span>文字サイズ</span>
-          <select id="previewFontSize">
-            <option value="xs">極小</option>
-            <option value="s">小</option>
-            <option value="m" selected>中</option>
-            <option value="l">大</option>
-            <option value="xl">特大</option>
-            <option value="custom">数値で指定</option>
-          </select>
-        </label>
-        <label class="preview-control" id="customFontSizeRow" style="display:none">
-          <span>一行(px)</span>
-          <input type="number" id="customFontSizeSingle" min="8" max="200" step="1" value="32">
-          <span>全体(px)</span>
-          <input type="number" id="customFontSizeAll" min="8" max="120" step="1" value="14">
-        </label>
-        <label class="toggle-btn" for="previewBgInput">背景を設定（画像/動画）</label>
-        <input type="file" id="previewBgInput" accept="image/*,video/*" style="display:none">
-        <button class="toggle-btn" type="button" id="previewBgClearBtn" disabled>背景をクリア</button>
-        <button class="toggle-btn" type="button" id="previewEqToggle">グラフィックイコライザー</button>
-      </div>
-      <div class="bg-controls" id="bgControls">
-        <label class="preview-control">
-          <span>背景サイズ</span>
-          <select id="bgSizeMode">
-            <option value="contain" selected>フィット（全体表示）</option>
-            <option value="cover">画面を覆う（トリミング）</option>
-            <option value="auto">原寸大</option>
-            <option value="zoom">ズーム（カスタム）</option>
-          </select>
-        </label>
-        <label class="preview-control">
-          <span>ズーム</span>
-          <input type="range" id="bgZoom" min="20" max="300" step="5" value="100">
-        </label>
-        <label class="preview-control">
-          <span>横位置</span>
-          <input type="range" id="bgPosX" min="0" max="100" step="1" value="50">
-        </label>
-        <label class="preview-control">
-          <span>縦位置</span>
-          <input type="range" id="bgPosY" min="0" max="100" step="1" value="50">
-        </label>
-        <label class="preview-control" id="bgVideoLoopEffectRow" title="背景動画がループする瞬間の唐突なカットを緩和します（動画背景の時のみ）">
-          <span>動画ループ時エフェクト</span>
-          <select id="bgLoopEffect">
-            <option value="none" selected>なし</option>
-            <option value="fade">フェード</option>
-          </select>
-        </label>
-        <label class="preview-control" id="bgVideoLoopFadeRow" title="背景動画がループする瞬間の唐突なカットを緩和します（動画背景の時のみ）">
-          <span>ループフェード時間(秒)</span>
-          <input type="range" id="bgLoopFadeDuration" min="0.1" max="2" step="0.1" value="0.5">
-        </label>
-      </div>
-      <div class="font-style-controls" id="fontStyleControls">
-        <label class="preview-control">
-          <span>太さ</span>
-          <select id="fontWeight">
-            <option value="100">極細 (100)</option>
-            <option value="300">細字 (300)</option>
-            <option value="400">標準 (400)</option>
-            <option value="500">中太 (500)</option>
-            <option value="700" selected>太字 (700)</option>
-            <option value="900">極太 (900)</option>
-          </select>
-        </label>
-        <button class="toggle-btn" type="button" id="fontItalicToggle">イタリック</button>
-        <label class="preview-control">
-          <span>文字間隔</span>
-          <input type="range" id="fontLetterSpacing" min="-0.05" max="0.3" step="0.01" value="0.01">
-        </label>
-        <label class="preview-control">
-          <span>行間</span>
-          <input type="range" id="fontLineHeight" min="1" max="2.2" step="0.1" value="1.5">
-        </label>
-        <label class="preview-control">
-          <span>縁取り太さ</span>
-          <input type="range" id="fontStrokeWidth" min="0" max="4" step="0.5" value="0">
-        </label>
-        <label class="preview-control">
-          <span>縁取り色</span>
-          <input type="color" id="fontStrokeColor" value="#0a1512">
-        </label>
-        <label class="preview-control">
-          <span>影の色</span>
-          <input type="color" id="fontShadowColor" value="#33d6c0">
-        </label>
-        <label class="preview-control">
-          <span>影の強さ</span>
-          <input type="range" id="fontShadowStrength" min="0" max="1" step="0.05" value="0.55">
-        </label>
-        <label class="preview-control">
-          <span>文字横位置(%)</span>
-          <input type="range" id="textPosXRange" min="0" max="100" step="1" value="50">
-          <input type="number" id="textPosXNumber" min="0" max="100" step="1" value="50">
-        </label>
-        <label class="preview-control">
-          <span>文字縦位置(%)</span>
-          <input type="range" id="textPosYRange" min="0" max="100" step="1" value="50">
-          <input type="number" id="textPosYNumber" min="0" max="100" step="1" value="50">
-        </label>
-        <label class="preview-control">
-          <span>切替エフェクト</span>
-          <select id="lineTransitionEffect">
-            <option value="none" selected>なし</option>
-            <option value="fade">フェード</option>
-            <option value="slide-up">スライド（上へ）</option>
-            <option value="slide-down">スライド（下へ）</option>
-            <option value="zoom">ズーム</option>
-          </select>
-        </label>
-        <label class="preview-control">
-          <span>フェードイン(秒)</span>
-          <input type="range" id="transitionInDuration" min="0.05" max="1" step="0.05" value="0.22">
-        </label>
-        <label class="preview-control">
-          <span>フェードアウト(秒)</span>
-          <input type="range" id="transitionOutDuration" min="0.05" max="1" step="0.05" value="0.22">
-        </label>
-        <label class="preview-control" title="切替エフェクトのせいで歌詞表示が遅れて見える場合に調整してください。プラスで表示を早める、マイナスで遅らせます">
-          <span>歌詞オフセット(秒)</span>
-          <input type="range" id="lyricsOffsetRange" min="-2" max="2" step="0.05" value="0">
-          <input type="number" id="lyricsOffsetNumber" min="-2" max="2" step="0.05" value="0">
-        </label>
-      </div>
-      <div class="eq-controls" id="eqControls">
-        <label class="preview-control">
-          <span>EQ種類</span>
-          <select id="eqStyleType">
-            <option value="bars">バー</option>
-            <option value="mirror">ミラーバー</option>
-            <option value="wave">波形</option>
-            <option value="circular">サークル</option>
-            <option value="dots">ドット</option>
-            <option value="led">LEDブロック</option>
-            <option value="radialDots">放射ドット</option>
-            <option value="polygon">ポリゴン</option>
-            <option value="rays">スターバースト</option>
-            <option value="ripple">リップル</option>
-            <option value="particles">パーティクル</option>
-            <option value="orb">ブリージングオーブ</option>
-            <option value="smoothline">スムースライン</option>
-            <option value="auraring">オーラリング</option>
-            <option value="oscilloscope">オシロスコープ</option>
-          </select>
-        </label>
-        <label class="preview-control">
-          <span>カラー1</span>
-          <input type="color" id="eqColorStart" value="#7fe9db">
-        </label>
-        <label class="preview-control">
-          <span>カラー2</span>
-          <input type="color" id="eqColorEnd" value="#33d6c0">
-        </label>
-        <label class="preview-control">
-          <span>密度</span>
-          <input type="range" id="eqBarCount" min="12" max="64" step="1" value="40">
-        </label>
-        <label class="preview-control">
-          <span>なめらかさ</span>
-          <input type="range" id="eqSmoothing" min="0" max="0.95" step="0.05" value="0.8">
-        </label>
-        <label class="preview-control" title="曲が静かでEQがあまり動かない時は上げてください">
-          <span>感度（基準レベル）</span>
-          <input type="range" id="eqSensitivity" min="0.5" max="3" step="0.1" value="1">
-        </label>
-        <label class="preview-control">
-          <span>グロー</span>
-          <input type="range" id="eqGlow" min="0" max="1" step="0.05" value="0.4">
-        </label>
-        <label class="preview-control">
-          <span>横位置</span>
-          <select id="eqPosX">
-            <option value="left">左</option>
-            <option value="center" selected>中央</option>
-            <option value="right">右</option>
-          </select>
-        </label>
-        <label class="preview-control">
-          <span>縦位置</span>
-          <select id="eqPosY">
-            <option value="top">上</option>
-            <option value="center" selected>中央</option>
-            <option value="bottom">下</option>
-          </select>
-        </label>
-        <label class="preview-control">
-          <span>EQ幅</span>
-          <input type="range" id="eqWidth" min="10" max="100" step="5" value="100">
-        </label>
-        <label class="preview-control">
-          <span>EQ高さ</span>
-          <input type="range" id="eqHeight" min="10" max="100" step="5" value="100">
-        </label>
-        <button class="toggle-btn" type="button" id="eqAutoStyleBtn">曲の雰囲気から自動生成</button>
-      </div>
-      <div class="export-controls" id="exportControls">
-        <label class="preview-control">
-          <span>解像度</span>
-          <select id="exportResolution">
-            <option value="720p" selected>720p</option>
-            <option value="1080p">1080p</option>
-            <option value="4k">4K</option>
-          </select>
-        </label>
-        <label class="preview-control">
-          <span>フレームレート</span>
-          <select id="exportFramerate">
-            <option value="24">24fps</option>
-            <option value="30" selected>30fps</option>
-            <option value="60">60fps</option>
-          </select>
-        </label>
-        <button class="toggle-btn" type="button" id="recordVideoBtn">プレビューを動画として保存</button>
-        <span class="hint" id="recordStatusHint"></span>
       </div>
       <div class="preview-stage-outer" id="previewStageOuter">
         <div class="preview-stage" id="previewStage">
@@ -786,6 +664,271 @@
           <div class="preview-all" id="previewAll" style="display:none"></div>
         </div>
       </div>
+      <details class="param-section" open>
+        <summary class="param-section-head"><span>プレビュー設定の保存/読込</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="style-io-controls" id="styleIoControls">
+          <button class="toggle-btn" type="button" id="previewStyleSaveBtn">プレビュー設定を保存</button>
+          <label class="toggle-btn" for="previewStyleLoadInput">プレビュー設定を読み込み</label>
+          <input type="file" id="previewStyleLoadInput" accept=".json,application/json" style="display:none">
+          <span class="hint">フォント・背景・グラフィックイコライザーなど、歌詞プレビューの設定一式を保存/読み込みします（背景の画像・動画そのものは含みません）</span>
+        </div>
+      </details>
+      <details class="param-section" open>
+        <summary class="param-section-head"><span>フォント・文字スタイル</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="preview-controls">
+          <label class="preview-control">
+            <span>フォント</span>
+            <select id="previewFontFamily"></select>
+          </label>
+          <label class="preview-control" id="customFontRow" style="display:none">
+            <input type="text" id="customFontNameInput" placeholder="Google Fontsのフォント名（例: Zen Kaku Gothic New）">
+            <button class="toggle-btn" type="button" id="customFontApplyBtn">適用</button>
+          </label>
+          <label class="preview-control">
+            <span>文字サイズ</span>
+            <select id="previewFontSize">
+              <option value="xs">極小</option>
+              <option value="s">小</option>
+              <option value="m" selected>中</option>
+              <option value="l">大</option>
+              <option value="xl">特大</option>
+              <option value="custom">数値で指定</option>
+            </select>
+          </label>
+          <label class="preview-control" id="customFontSizeRow" style="display:none">
+            <span>一行(px)</span>
+            <input type="number" id="customFontSizeSingle" min="8" max="200" step="1" value="32">
+            <span>全体(px)</span>
+            <input type="number" id="customFontSizeAll" min="8" max="120" step="1" value="14">
+          </label>
+        </div>
+        <div class="font-style-controls" id="fontStyleControls">
+          <label class="preview-control">
+            <span>太さ</span>
+            <select id="fontWeight">
+              <option value="100">極細 (100)</option>
+              <option value="300">細字 (300)</option>
+              <option value="400">標準 (400)</option>
+              <option value="500">中太 (500)</option>
+              <option value="700" selected>太字 (700)</option>
+              <option value="900">極太 (900)</option>
+            </select>
+          </label>
+          <button class="toggle-btn" type="button" id="fontItalicToggle">イタリック</button>
+          <label class="preview-control">
+            <span>文字間隔</span>
+            <input type="range" id="fontLetterSpacing" min="-0.05" max="0.3" step="0.01" value="0.01">
+          </label>
+          <label class="preview-control">
+            <span>行間</span>
+            <input type="range" id="fontLineHeight" min="1" max="2.2" step="0.1" value="1.5">
+          </label>
+          <label class="preview-control">
+            <span>縁取り太さ</span>
+            <input type="range" id="fontStrokeWidth" min="0" max="4" step="0.5" value="0">
+          </label>
+          <label class="preview-control">
+            <span>縁取り色</span>
+            <input type="color" id="fontStrokeColor" value="#0a1512">
+          </label>
+          <label class="preview-control">
+            <span>影の色</span>
+            <input type="color" id="fontShadowColor" value="#33d6c0">
+          </label>
+          <label class="preview-control">
+            <span>影の強さ</span>
+            <input type="range" id="fontShadowStrength" min="0" max="1" step="0.05" value="0.55">
+          </label>
+          <button class="toggle-btn" type="button" id="textMaskToggle" title="背景画像・動画に対して文字が読みにくい時に、文字の背後に半透明のマスクを敷きます">文字背景マスク</button>
+          <label class="preview-control">
+            <span>マスク色</span>
+            <input type="color" id="textMaskColor" value="#000000">
+          </label>
+          <label class="preview-control">
+            <span>マスク不透明度</span>
+            <input type="range" id="textMaskOpacity" min="0" max="1" step="0.05" value="0.55">
+          </label>
+          <label class="preview-control">
+            <span>マスクの余白</span>
+            <input type="range" id="textMaskPadding" min="0" max="40" step="1" value="10">
+          </label>
+          <label class="preview-control">
+            <span>マスクの角丸</span>
+            <input type="range" id="textMaskRadius" min="0" max="40" step="1" value="8">
+          </label>
+          <label class="preview-control">
+            <span>文字横位置(%)</span>
+            <input type="range" id="textPosXRange" min="0" max="100" step="1" value="50">
+            <input type="number" id="textPosXNumber" min="0" max="100" step="1" value="50">
+          </label>
+          <label class="preview-control">
+            <span>文字縦位置(%)</span>
+            <input type="range" id="textPosYRange" min="0" max="100" step="1" value="50">
+            <input type="number" id="textPosYNumber" min="0" max="100" step="1" value="50">
+          </label>
+          <label class="preview-control">
+            <span>切替エフェクト</span>
+            <select id="lineTransitionEffect">
+              <option value="none" selected>なし</option>
+              <option value="fade">フェード</option>
+              <option value="slide-up">スライド（上へ）</option>
+              <option value="slide-down">スライド（下へ）</option>
+              <option value="zoom">ズーム</option>
+            </select>
+          </label>
+          <label class="preview-control">
+            <span>フェードイン(秒)</span>
+            <input type="range" id="transitionInDuration" min="0.05" max="1" step="0.05" value="0.22">
+          </label>
+          <label class="preview-control">
+            <span>フェードアウト(秒)</span>
+            <input type="range" id="transitionOutDuration" min="0.05" max="1" step="0.05" value="0.22">
+          </label>
+          <label class="preview-control" title="切替エフェクトのせいで歌詞表示が遅れて見える場合に調整してください。プラスで表示を早める、マイナスで遅らせます">
+            <span>歌詞オフセット(秒)</span>
+            <input type="range" id="lyricsOffsetRange" min="-2" max="2" step="0.05" value="0">
+            <input type="number" id="lyricsOffsetNumber" min="-2" max="2" step="0.05" value="0">
+          </label>
+        </div>
+      </details>
+      <details class="param-section" open>
+        <summary class="param-section-head"><span>背景（画像/動画）</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="bg-controls" id="bgControls">
+          <label class="toggle-btn" for="previewBgInput">背景を設定（画像/動画）</label>
+          <input type="file" id="previewBgInput" accept="image/*,video/*" style="display:none">
+          <button class="toggle-btn" type="button" id="previewBgClearBtn" disabled>背景をクリア</button>
+          <label class="preview-control">
+            <span>背景サイズ</span>
+            <select id="bgSizeMode">
+              <option value="contain" selected>フィット（全体表示）</option>
+              <option value="cover">画面を覆う（トリミング）</option>
+              <option value="auto">原寸大</option>
+              <option value="zoom">ズーム（カスタム）</option>
+            </select>
+          </label>
+          <label class="preview-control">
+            <span>ズーム</span>
+            <input type="range" id="bgZoom" min="20" max="300" step="5" value="100">
+          </label>
+          <label class="preview-control">
+            <span>横位置</span>
+            <input type="range" id="bgPosX" min="0" max="100" step="1" value="50">
+          </label>
+          <label class="preview-control">
+            <span>縦位置</span>
+            <input type="range" id="bgPosY" min="0" max="100" step="1" value="50">
+          </label>
+          <label class="preview-control" id="bgVideoLoopEffectRow" title="背景動画がループする瞬間の唐突なカットを緩和します（動画背景の時のみ）">
+            <span>動画ループ時エフェクト</span>
+            <select id="bgLoopEffect">
+              <option value="none" selected>なし</option>
+              <option value="fade">フェード</option>
+            </select>
+          </label>
+          <label class="preview-control" id="bgVideoLoopFadeRow" title="背景動画がループする瞬間の唐突なカットを緩和します（動画背景の時のみ）">
+            <span>ループフェード時間(秒)</span>
+            <input type="range" id="bgLoopFadeDuration" min="0.1" max="2" step="0.1" value="0.5">
+          </label>
+        </div>
+      </details>
+      <details class="param-section" open>
+        <summary class="param-section-head"><span>グラフィックイコライザー</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="eq-controls" id="eqControls">
+          <button class="toggle-btn" type="button" id="previewEqToggle">グラフィックイコライザーを表示</button>
+          <label class="preview-control">
+            <span>EQ種類</span>
+            <select id="eqStyleType">
+              <option value="bars">バー</option>
+              <option value="mirror">ミラーバー</option>
+              <option value="wave">波形</option>
+              <option value="circular">サークル</option>
+              <option value="dots">ドット</option>
+              <option value="led">LEDブロック</option>
+              <option value="radialDots">放射ドット</option>
+              <option value="polygon">ポリゴン</option>
+              <option value="rays">スターバースト</option>
+              <option value="ripple">リップル</option>
+              <option value="particles">パーティクル</option>
+              <option value="orb">ブリージングオーブ</option>
+              <option value="smoothline">スムースライン</option>
+              <option value="auraring">オーラリング</option>
+              <option value="oscilloscope">オシロスコープ</option>
+            </select>
+          </label>
+          <label class="preview-control">
+            <span>カラー1</span>
+            <input type="color" id="eqColorStart" value="#7fe9db">
+          </label>
+          <label class="preview-control">
+            <span>カラー2</span>
+            <input type="color" id="eqColorEnd" value="#33d6c0">
+          </label>
+          <label class="preview-control">
+            <span>密度</span>
+            <input type="range" id="eqBarCount" min="12" max="64" step="1" value="40">
+          </label>
+          <label class="preview-control">
+            <span>なめらかさ</span>
+            <input type="range" id="eqSmoothing" min="0" max="0.95" step="0.05" value="0.8">
+          </label>
+          <label class="preview-control" title="曲が静かでEQがあまり動かない時は上げてください">
+            <span>感度（基準レベル）</span>
+            <input type="range" id="eqSensitivity" min="0.5" max="3" step="0.1" value="1">
+          </label>
+          <label class="preview-control">
+            <span>グロー</span>
+            <input type="range" id="eqGlow" min="0" max="1" step="0.05" value="0.4">
+          </label>
+          <label class="preview-control">
+            <span>横位置</span>
+            <select id="eqPosX">
+              <option value="left">左</option>
+              <option value="center" selected>中央</option>
+              <option value="right">右</option>
+            </select>
+          </label>
+          <label class="preview-control">
+            <span>縦位置</span>
+            <select id="eqPosY">
+              <option value="top">上</option>
+              <option value="center" selected>中央</option>
+              <option value="bottom">下</option>
+            </select>
+          </label>
+          <label class="preview-control">
+            <span>EQ幅</span>
+            <input type="range" id="eqWidth" min="10" max="100" step="5" value="100">
+          </label>
+          <label class="preview-control">
+            <span>EQ高さ</span>
+            <input type="range" id="eqHeight" min="10" max="100" step="5" value="100">
+          </label>
+          <button class="toggle-btn" type="button" id="eqAutoStyleBtn">曲の雰囲気から自動生成</button>
+        </div>
+      </details>
+      <details class="param-section" open>
+        <summary class="param-section-head"><span>動画書き出し</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></summary>
+        <div class="export-controls" id="exportControls">
+          <label class="preview-control">
+            <span>解像度</span>
+            <select id="exportResolution">
+              <option value="720p" selected>720p</option>
+              <option value="1080p">1080p</option>
+              <option value="4k">4K</option>
+            </select>
+          </label>
+          <label class="preview-control">
+            <span>フレームレート</span>
+            <select id="exportFramerate">
+              <option value="24">24fps</option>
+              <option value="30" selected>30fps</option>
+              <option value="60">60fps</option>
+            </select>
+          </label>
+          <button class="toggle-btn" type="button" id="recordVideoBtn">プレビューを動画として保存</button>
+          <span class="hint" id="recordStatusHint"></span>
+        </div>
+      </details>
     </div>
 
     <div class="lyrics-section">
@@ -800,6 +943,7 @@
       <div class="table-toolbar">
         <button class="ghost-btn small" id="autoTimeBtn">曲を解析してタイミングを自動セット</button>
         <button class="ghost-btn small" id="bulkSyncBtn" disabled>選択行: 終了時間を次行の開始時間にセット</button>
+        <button class="ghost-btn small" id="textEditToggleBtn">テキストで編集</button>
         <span class="hint" id="selectedCountHint"></span>
       </div>
 
@@ -824,6 +968,18 @@
           既存の.srtファイルを開くと、開始・終了時間も含めてそのまま読み込めます。
         </div>
       </div>
+
+      <div class="lyrics-text-editor" id="lyricsTextEditor" style="display:none">
+        <div class="hint">
+          1行 = 歌詞1行。タイミングがある行は <span class="kbd">開始時間 --&gt; 終了時間  歌詞</span> の形式（時間は変更・削除可）。
+          タイミングのない行はテキストだけでOK。空行はそのまま空行として扱われます。
+        </div>
+        <textarea id="lyricsTextArea" spellcheck="false"></textarea>
+        <div class="lyrics-text-editor-actions">
+          <button class="ghost-btn small" id="lyricsTextCancelBtn">キャンセル</button>
+          <button class="primary-btn" id="lyricsTextApplyBtn">テーブルに反映</button>
+        </div>
+      </div>
     </div>
   </main>
 
@@ -836,6 +992,17 @@
     </button>
   </footer>
 
+</div>
+
+<div class="preview-popup" id="previewPopup" style="display:none">
+  <div class="preview-popup-head" id="previewPopupHead">
+    <span class="preview-popup-title">プレビュー</span>
+    <div class="preview-popup-actions">
+      <button type="button" class="preview-popup-btn" id="previewPopupFullscreenBtn" title="全画面表示">⛶</button>
+      <button type="button" class="preview-popup-btn" id="previewPopupCloseBtn" title="ポップアップを閉じてドッキング">×</button>
+    </div>
+  </div>
+  <div class="preview-popup-body" id="previewPopupBody"></div>
 </div>
 
 <script>
@@ -913,6 +1080,12 @@
   const selectAllCheckbox = document.getElementById('selectAllCheckbox');
   const autoTimeBtn = document.getElementById('autoTimeBtn');
   const bulkSyncBtn = document.getElementById('bulkSyncBtn');
+  const textEditToggleBtn = document.getElementById('textEditToggleBtn');
+  const lyricsWrap = document.getElementById('lyricsWrap');
+  const lyricsTextEditor = document.getElementById('lyricsTextEditor');
+  const lyricsTextArea = document.getElementById('lyricsTextArea');
+  const lyricsTextCancelBtn = document.getElementById('lyricsTextCancelBtn');
+  const lyricsTextApplyBtn = document.getElementById('lyricsTextApplyBtn');
   const selectedCountHint = document.getElementById('selectedCountHint');
   let selectedIds = new Set();
 
@@ -939,6 +1112,11 @@
   const fontStrokeColorInput = document.getElementById('fontStrokeColor');
   const fontShadowColorInput = document.getElementById('fontShadowColor');
   const fontShadowStrengthInput = document.getElementById('fontShadowStrength');
+  const textMaskToggle = document.getElementById('textMaskToggle');
+  const textMaskColorInput = document.getElementById('textMaskColor');
+  const textMaskOpacityInput = document.getElementById('textMaskOpacity');
+  const textMaskPaddingInput = document.getElementById('textMaskPadding');
+  const textMaskRadiusInput = document.getElementById('textMaskRadius');
   const textPosXRange = document.getElementById('textPosXRange');
   const textPosXNumber = document.getElementById('textPosXNumber');
   const textPosYRange = document.getElementById('textPosYRange');
@@ -968,6 +1146,13 @@
   const previewRatioVerticalBtn = document.getElementById('previewRatioVertical');
   const previewRatioHorizontalBtn = document.getElementById('previewRatioHorizontal');
   const previewRatioBtns = [previewRatioFreeBtn, previewRatioVerticalBtn, previewRatioHorizontalBtn];
+  const previewPopupBtn = document.getElementById('previewPopupBtn');
+  const previewFullscreenBtn = document.getElementById('previewFullscreenBtn');
+  const previewPopup = document.getElementById('previewPopup');
+  const previewPopupHead = document.getElementById('previewPopupHead');
+  const previewPopupBody = document.getElementById('previewPopupBody');
+  const previewPopupFullscreenBtn = document.getElementById('previewPopupFullscreenBtn');
+  const previewPopupCloseBtn = document.getElementById('previewPopupCloseBtn');
   const eqStyleTypeSelect = document.getElementById('eqStyleType');
   const eqColorStartInput = document.getElementById('eqColorStart');
   const eqColorEndInput = document.getElementById('eqColorEnd');
@@ -1151,20 +1336,25 @@
       singleSize = size.single;
       allSize = size.all;
     }
-    previewPanel.style.setProperty('--preview-font-family', cssFamily);
-    previewPanel.style.setProperty('--preview-single-size', singleSize);
-    previewPanel.style.setProperty('--preview-all-size', allSize);
-    previewPanel.style.setProperty('--preview-font-weight', fontWeightSelect.value);
-    previewPanel.style.setProperty('--preview-font-style', fontItalicToggle.classList.contains('active') ? 'italic' : 'normal');
-    previewPanel.style.setProperty('--preview-letter-spacing', fontLetterSpacingInput.value + 'em');
-    previewPanel.style.setProperty('--preview-line-height', fontLineHeightInput.value);
-    previewPanel.style.setProperty('--preview-stroke-width', fontStrokeWidthInput.value + 'px');
-    previewPanel.style.setProperty('--preview-stroke-color', parseFloat(fontStrokeWidthInput.value) > 0 ? fontStrokeColorInput.value : 'transparent');
-    previewPanel.style.setProperty('--preview-shadow-color', hexToRgba(fontShadowColorInput.value, fontShadowStrengthInput.value));
-    previewPanel.style.setProperty('--preview-shadow-blur', (fontShadowStrengthInput.value * 40) + 'px');
+    document.documentElement.style.setProperty('--preview-font-family', cssFamily);
+    document.documentElement.style.setProperty('--preview-single-size', singleSize);
+    document.documentElement.style.setProperty('--preview-all-size', allSize);
+    document.documentElement.style.setProperty('--preview-font-weight', fontWeightSelect.value);
+    document.documentElement.style.setProperty('--preview-font-style', fontItalicToggle.classList.contains('active') ? 'italic' : 'normal');
+    document.documentElement.style.setProperty('--preview-letter-spacing', fontLetterSpacingInput.value + 'em');
+    document.documentElement.style.setProperty('--preview-line-height', fontLineHeightInput.value);
+    document.documentElement.style.setProperty('--preview-stroke-width', fontStrokeWidthInput.value + 'px');
+    document.documentElement.style.setProperty('--preview-stroke-color', parseFloat(fontStrokeWidthInput.value) > 0 ? fontStrokeColorInput.value : 'transparent');
+    document.documentElement.style.setProperty('--preview-shadow-color', hexToRgba(fontShadowColorInput.value, fontShadowStrengthInput.value));
+    document.documentElement.style.setProperty('--preview-shadow-blur', (fontShadowStrengthInput.value * 40) + 'px');
 
-    previewPanel.style.setProperty('--preview-text-x', (parseFloat(textPosXNumber.value) || 50) + '%');
-    previewPanel.style.setProperty('--preview-text-y', (parseFloat(textPosYNumber.value) || 50) + '%');
+    document.documentElement.style.setProperty('--preview-text-x', (parseFloat(textPosXNumber.value) || 50) + '%');
+    document.documentElement.style.setProperty('--preview-text-y', (parseFloat(textPosYNumber.value) || 50) + '%');
+
+    document.documentElement.style.setProperty('--preview-mask-color', hexToRgba(textMaskColorInput.value, textMaskOpacityInput.value));
+    document.documentElement.style.setProperty('--preview-mask-padding', textMaskPaddingInput.value + 'px');
+    document.documentElement.style.setProperty('--preview-mask-radius', textMaskRadiusInput.value + 'px');
+    document.documentElement.classList.toggle('text-mask-enabled', textMaskToggle.classList.contains('active'));
   }
 
   previewFontFamilySelect.addEventListener('change', function(){
@@ -1188,6 +1378,13 @@
     applyPreviewStyle();
   });
   [fontLetterSpacingInput, fontLineHeightInput, fontStrokeWidthInput, fontStrokeColorInput, fontShadowColorInput, fontShadowStrengthInput].forEach(function(el){
+    el.addEventListener('input', applyPreviewStyle);
+  });
+  textMaskToggle.addEventListener('click', function(){
+    textMaskToggle.classList.toggle('active');
+    applyPreviewStyle();
+  });
+  [textMaskColorInput, textMaskOpacityInput, textMaskPaddingInput, textMaskRadiusInput].forEach(function(el){
     el.addEventListener('input', applyPreviewStyle);
   });
   function linkRangeAndNumber(rangeEl, numberEl){
@@ -1287,8 +1484,8 @@
       case 'zoom': sizeValue = bgZoomInput.value + '% auto'; break;
       default: sizeValue = 'contain';
     }
-    previewPanel.style.setProperty('--preview-bg-size', sizeValue);
-    previewPanel.style.setProperty('--preview-bg-position', bgPosXInput.value + '% ' + bgPosYInput.value + '%');
+    document.documentElement.style.setProperty('--preview-bg-size', sizeValue);
+    document.documentElement.style.setProperty('--preview-bg-position', bgPosXInput.value + '% ' + bgPosYInput.value + '%');
     applyBgVideoLayout();
   }
   bgSizeModeSelect.addEventListener('change', applyBgTransform);
@@ -1300,6 +1497,23 @@
   if(typeof ResizeObserver !== 'undefined'){
     new ResizeObserver(applyBgVideoLayout).observe(previewStage);
   }
+
+  // Font size (and stroke/shadow/mask sizing) is authored in px against the
+  // normal small in-page preview. Reused as-is inside the popup or
+  // fullscreen - both far larger than the normal stage - lyrics would look
+  // tiny relative to the video. Scale everything by how much bigger the
+  // stage currently renders than this baseline width.
+  const PREVIEW_SCALE_BASE_WIDTH = 640;
+  function updatePreviewScale(){
+    const rect = previewStage.getBoundingClientRect();
+    if(!rect.width) return;
+    const scale = clamp(rect.width / PREVIEW_SCALE_BASE_WIDTH, 0.4, 6);
+    document.documentElement.style.setProperty('--preview-scale', scale);
+  }
+  if(typeof ResizeObserver !== 'undefined'){
+    new ResizeObserver(updatePreviewScale).observe(previewStage);
+  }
+  updatePreviewScale();
 
   // Keep the background video's playback position derived from the audio
   // element's currentTime (looping via modulo its own duration) instead of
@@ -2848,6 +3062,27 @@
     const lines = wrapTextLines(ctx, text, maxWidth);
     const totalH = lines.length * lineHeight;
     let y = anchorY - totalH / 2 + lineHeight / 2;
+
+    if(textMaskToggle.classList.contains('active')){
+      let maxLineWidth = 0;
+      lines.forEach(function(ln){ maxLineWidth = Math.max(maxLineWidth, ctx.measureText(ln).width); });
+      const maskPadY = (parseFloat(textMaskPaddingInput.value) || 0) * scale;
+      const maskPadX = maskPadY * 1.6;
+      const maskW = maxLineWidth + maskPadX * 2;
+      const maskH = totalH + maskPadY * 2;
+      const maskRadius = (parseFloat(textMaskRadiusInput.value) || 0) * scale;
+      ctx.save();
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = hexToRgba(textMaskColorInput.value, parseFloat(textMaskOpacityInput.value) || 0);
+      ctx.beginPath();
+      const rx = anchorX - maskW / 2, ry = anchorY - maskH / 2;
+      if(ctx.roundRect) ctx.roundRect(rx, ry, maskW, maskH, maskRadius);
+      else ctx.rect(rx, ry, maskW, maskH);
+      ctx.fill();
+      ctx.restore();
+    }
+
     ctx.shadowColor = cfg.shadowColor;
     ctx.shadowBlur = cfg.shadowBlur * scale;
     lines.forEach(function(ln){
@@ -2871,7 +3106,7 @@
     const lineHeight = sizePx * cfg.lineHeightRatio * 1.4;
     const timeable = [];
     lyricsLines.forEach(function(line, idx){
-      if(line.isBlank) return;
+      if(line.isBlank || line.isMeta) return;
       timeable.push({ idx: idx, line: line });
     });
     if(timeable.length === 0) return;
@@ -2904,6 +3139,24 @@
         ctx.lineWidth = cfg.strokeWidth * scale;
         ctx.strokeStyle = cfg.strokeColor;
         ctx.strokeText(text, w/2, y);
+      }
+      if(!isActive && textMaskToggle.classList.contains('active')){
+        const textW = ctx.measureText(text).width;
+        const maskPadY = (parseFloat(textMaskPaddingInput.value) || 0) * scale * 0.5;
+        const maskPadX = maskPadY * 1.6;
+        const maskW = textW + maskPadX * 2;
+        const maskH = fontSize + maskPadY * 2;
+        const maskRadius = (parseFloat(textMaskRadiusInput.value) || 0) * scale * 0.5;
+        ctx.save();
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = hexToRgba(textMaskColorInput.value, parseFloat(textMaskOpacityInput.value) || 0);
+        ctx.beginPath();
+        const rx = w/2 - maskW/2, ry = y - maskH/2;
+        if(ctx.roundRect) ctx.roundRect(rx, ry, maskW, maskH, maskRadius);
+        else ctx.rect(rx, ry, maskW, maskH);
+        ctx.fill();
+        ctx.restore();
       }
       ctx.fillText(text, w/2, y);
     });
@@ -3225,6 +3478,24 @@
   });
   seek.addEventListener('change', function(){ isScrubbing = false; });
 
+  // Hover/drag tooltip showing the time at the cursor position, so users can
+  // aim for a specific point before releasing instead of scrubbing blind.
+  const seekTooltip = document.getElementById('seekTooltip');
+  function updateSeekTooltip(clientX){
+    const rect = seek.getBoundingClientRect();
+    const frac = clamp(rect.width ? (clientX - rect.left) / rect.width : 0, 0, 1);
+    const dur = parseFloat(seek.max) || 0;
+    seekTooltip.textContent = fmtClock(frac * dur);
+    seekTooltip.style.left = (frac * rect.width) + 'px';
+  }
+  seek.addEventListener('pointermove', function(ev){
+    if(!seek.disabled){ updateSeekTooltip(ev.clientX); seekTooltip.classList.add('visible'); }
+  });
+  seek.addEventListener('pointerenter', function(ev){
+    if(!seek.disabled){ updateSeekTooltip(ev.clientX); seekTooltip.classList.add('visible'); }
+  });
+  seek.addEventListener('pointerleave', function(){ seekTooltip.classList.remove('visible'); });
+
   back5.addEventListener('click', function(){ nudge(-5); });
   fwd5.addEventListener('click', function(){ nudge(5); });
   function nudge(delta){
@@ -3265,6 +3536,83 @@
     currentIndex = firstTimeableIndex(0);
     renderTable();
   }
+
+  /* ===================== Lyrics timetable: text-editor mode ===================== */
+  // One line per lyric line. Timed lines are "start --> end  text" (either
+  // side of the arrow can be blank); everything else is treated as plain
+  // text and auto-classified as meta/blank exactly like manual typing does.
+  const TEXT_EDITOR_LINE_RE = /^(\d{2}:\d{2}:\d{2},\d{3})?\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})?\s{1,2}(.*)$/;
+
+  function getLyricsAsText(){
+    return lyricsLines.map(function(line){
+      if(line.start !== null || line.end !== null){
+        const startStr = line.start !== null ? secToSrt(line.start) : '';
+        const endStr = line.end !== null ? secToSrt(line.end) : '';
+        return startStr + ' --> ' + endStr + '  ' + line.text;
+      }
+      return line.text;
+    }).join('\n');
+  }
+
+  function parseLyricsFromText(text){
+    const rawLines = text.replace(/\r\n/g, '\n').split('\n');
+    return rawLines.map(function(line){
+      const m = line.match(TEXT_EDITOR_LINE_RE);
+      if(m){
+        const txt = m[3];
+        const trimmed = txt.trim();
+        return {
+          id: uid++,
+          text: txt,
+          isMeta: METATAG_RE.test(trimmed),
+          isBlank: trimmed.length === 0,
+          start: m[1] ? srtToSec(m[1]) : null,
+          end: m[2] ? srtToSec(m[2]) : null
+        };
+      }
+      const trimmed = line.trim();
+      return {
+        id: uid++,
+        text: line,
+        isMeta: METATAG_RE.test(trimmed),
+        isBlank: trimmed.length === 0,
+        start: null,
+        end: null
+      };
+    });
+  }
+
+  function enterLyricsTextEdit(){
+    lyricsTextArea.value = getLyricsAsText();
+    lyricsWrap.style.display = 'none';
+    lyricsTextEditor.style.display = 'flex';
+    textEditToggleBtn.classList.add('active');
+    lyricsTextArea.focus();
+  }
+  function exitLyricsTextEdit(){
+    lyricsWrap.style.display = '';
+    lyricsTextEditor.style.display = 'none';
+    textEditToggleBtn.classList.remove('active');
+  }
+  textEditToggleBtn.addEventListener('click', function(){
+    if(lyricsTextEditor.style.display === 'none') enterLyricsTextEdit();
+    else exitLyricsTextEdit();
+  });
+  lyricsTextCancelBtn.addEventListener('click', exitLyricsTextEdit);
+  lyricsTextApplyBtn.addEventListener('click', function(){
+    lyricsLines = parseLyricsFromText(lyricsTextArea.value);
+    // Trailing blank line from a final newline is an artifact, not a
+    // deliberate blank line - drop it, same as the .md/.txt import path.
+    if(lyricsLines.length && lyricsLines[lyricsLines.length - 1].isBlank &&
+       lyricsTextArea.value.replace(/\r\n/g, '\n').split('\n').slice(-1)[0] === ''){
+      lyricsLines.pop();
+    }
+    currentIndex = firstTimeableIndex(0);
+    renderTable();
+    exitLyricsTextEdit();
+    scheduleSaveSession();
+    setStatus('テキストの内容を歌詞タイムテーブルに反映しました', 'ok');
+  });
 
   function firstTimeableIndex(fromIdx){
     for(let i = fromIdx; i < lyricsLines.length; i++){
@@ -3385,6 +3733,20 @@
       tdStart.className = 'time start';
       const startRow = document.createElement('div');
       startRow.className = 'time-cell-row';
+      const playRowBtn = document.createElement('button');
+      playRowBtn.className = 'rowbtn playrow';
+      playRowBtn.textContent = '▶';
+      playRowBtn.title = 'この行の開始位置から再生';
+      if(line.isMeta || line.isBlank || line.start === null) playRowBtn.disabled = true;
+      playRowBtn.addEventListener('click', function(){
+        if(line.start === null) return;
+        if(!audioEl.src){ setStatus('先に音源ファイルを開いてください', 'err'); return; }
+        currentIndex = i;
+        audioEl.currentTime = line.start;
+        audioEl.play().catch(function(){});
+        renderTable();
+      });
+      startRow.appendChild(playRowBtn);
       const prevSyncBtn = document.createElement('button');
       prevSyncBtn.className = 'rowbtn';
       prevSyncBtn.textContent = '⇤';
@@ -3464,21 +3826,6 @@
       // actions
       const tdAct = document.createElement('td');
       tdAct.className = 'actions';
-      const playRowBtn = document.createElement('button');
-      playRowBtn.className = 'rowbtn playrow';
-      playRowBtn.textContent = '▶';
-      playRowBtn.title = 'この行の開始位置から再生';
-      playRowBtn.style.marginRight = '4px';
-      if(line.isMeta || line.isBlank || line.start === null) playRowBtn.disabled = true;
-      playRowBtn.addEventListener('click', function(){
-        if(line.start === null) return;
-        if(!audioEl.src){ setStatus('先に音源ファイルを開いてください', 'err'); return; }
-        currentIndex = i;
-        audioEl.currentTime = line.start;
-        audioEl.play().catch(function(){});
-        renderTable();
-      });
-      tdAct.appendChild(playRowBtn);
       const addBtn = document.createElement('button');
       addBtn.className = 'rowbtn';
       addBtn.textContent = '＋';
@@ -3685,6 +4032,7 @@
   // smoothly between lines (interpolated by time), instead of jumping only when
   // the highlighted line changes.
   let previewScrollRAF = null;
+  const PREVIEW_ALL_INTRO_LEAD_SEC = 2;
   function centerOffsetFor(el){
     return el.offsetTop - (previewAll.clientHeight / 2) + (el.clientHeight / 2);
   }
@@ -3701,7 +4049,16 @@
     const t = audioEl.currentTime + getLyricsOffsetSec();
     let target;
     if(t <= entries[0].start){
-      target = centerOffsetFor(entries[0].el);
+      // Before the first line, ease it in from below the visible area instead
+      // of snapping straight to centered - the same "scrolls up into place"
+      // motion used between every other pair of lines, applied to a virtual
+      // lead-in anchored a couple seconds before the first line's timestamp
+      // (or from t=0 if the line starts sooner than that).
+      const firstY = centerOffsetFor(entries[0].el);
+      const belowY = firstY + previewAll.clientHeight;
+      const introStart = Math.max(0, entries[0].start - PREVIEW_ALL_INTRO_LEAD_SEC);
+      const frac = clamp((t - introStart) / ((entries[0].start - introStart) || 1), 0, 1);
+      target = belowY + (firstY - belowY) * frac;
     } else if(t >= entries[entries.length - 1].start){
       target = centerOffsetFor(entries[entries.length - 1].el);
     } else {
@@ -3736,15 +4093,100 @@
     });
   });
 
+  /* ===================== Preview popup (floating, resizable) ===================== */
+  // The live .preview-stage-outer node (canvas + video + text) is physically
+  // moved into the popup and back, not cloned, so playback/animation state
+  // is never duplicated or interrupted.
+  let popupHomeParent = null, popupHomeNextSibling = null, isPopupOpen = false;
+
+  function openPreviewPopup(){
+    if(isPopupOpen) return;
+    popupHomeParent = previewStageOuter.parentNode;
+    popupHomeNextSibling = previewStageOuter.nextSibling;
+    previewPopupBody.appendChild(previewStageOuter);
+    previewPopup.style.display = 'flex';
+    isPopupOpen = true;
+    previewPopupBtn.classList.add('active');
+    if(eqEnabled) resizeEqCanvas();
+    applyBgVideoLayout();
+    updatePreviewScale();
+  }
+  function closePreviewPopup(){
+    if(!isPopupOpen) return;
+    if(document.fullscreenElement === previewStageOuter) document.exitFullscreen();
+    if(popupHomeNextSibling) popupHomeParent.insertBefore(previewStageOuter, popupHomeNextSibling);
+    else popupHomeParent.appendChild(previewStageOuter);
+    previewPopup.style.display = 'none';
+    isPopupOpen = false;
+    previewPopupBtn.classList.remove('active');
+    if(eqEnabled) resizeEqCanvas();
+    applyBgVideoLayout();
+    updatePreviewScale();
+  }
+  previewPopupBtn.addEventListener('click', function(){
+    if(isPopupOpen) closePreviewPopup(); else openPreviewPopup();
+  });
+  previewPopupCloseBtn.addEventListener('click', closePreviewPopup);
+
+  // Drag-to-move by the popup's header bar.
+  (function makePopupDraggable(){
+    let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+    previewPopupHead.addEventListener('pointerdown', function(ev){
+      if(ev.target.closest('.preview-popup-btn')) return;
+      dragging = true;
+      startX = ev.clientX; startY = ev.clientY;
+      const rect = previewPopup.getBoundingClientRect();
+      startLeft = rect.left; startTop = rect.top;
+      previewPopup.style.right = 'auto';
+      previewPopupHead.setPointerCapture(ev.pointerId);
+    });
+    previewPopupHead.addEventListener('pointermove', function(ev){
+      if(!dragging) return;
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      const maxLeft = window.innerWidth - 60, maxTop = window.innerHeight - 40;
+      previewPopup.style.left = clamp(startLeft + dx, 0, maxLeft) + 'px';
+      previewPopup.style.top = clamp(startTop + dy, 0, maxTop) + 'px';
+    });
+    ['pointerup', 'pointercancel'].forEach(function(evName){
+      previewPopupHead.addEventListener(evName, function(){ dragging = false; });
+    });
+  })();
+
+  /* ===================== Preview fullscreen ===================== */
+  function togglePreviewFullscreen(){
+    const isFs = document.fullscreenElement || document.webkitFullscreenElement;
+    if(isFs){
+      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    } else {
+      const req = previewStageOuter.requestFullscreen || previewStageOuter.webkitRequestFullscreen;
+      if(req) req.call(previewStageOuter);
+    }
+  }
+  previewFullscreenBtn.addEventListener('click', togglePreviewFullscreen);
+  previewPopupFullscreenBtn.addEventListener('click', togglePreviewFullscreen);
+  ['fullscreenchange', 'webkitfullscreenchange'].forEach(function(evName){
+    document.addEventListener(evName, function(){
+      const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      previewFullscreenBtn.classList.toggle('active', isFs);
+      previewPopupFullscreenBtn.classList.toggle('active', isFs);
+      if(eqEnabled) resizeEqCanvas();
+      applyBgVideoLayout();
+      updatePreviewScale();
+    });
+  });
+
   function renderPreviewAll(){
     previewAll.innerHTML = '';
     previewLineEls = {};
     previewActiveIdx = -1;
+    const topSpacer = document.createElement('div');
+    topSpacer.className = 'preview-all-spacer';
+    previewAll.appendChild(topSpacer);
     lyricsLines.forEach(function(line, i){
-      if(line.isBlank) return;
+      if(line.isBlank || line.isMeta) return;
       const div = document.createElement('div');
-      div.className = 'preview-line' + (line.isMeta ? ' meta' : '');
-      div.textContent = line.isMeta ? line.text.trim() : (stripMetaTags(line.text) || ' ');
+      div.className = 'preview-line';
+      div.textContent = stripMetaTags(line.text) || ' ';
       div.dataset.idx = i;
       previewAll.appendChild(div);
       previewLineEls[i] = div;
@@ -3755,6 +4197,9 @@
       empty.textContent = '歌詞を読み込むとここに表示されます';
       previewAll.appendChild(empty);
     }
+    const bottomSpacer = document.createElement('div');
+    bottomSpacer.className = 'preview-all-spacer';
+    previewAll.appendChild(bottomSpacer);
     if(previewMode === 'all') startPreviewScrollLoop();
   }
 
@@ -3783,11 +4228,11 @@
     const outDur = Math.max(0.02, parseFloat(transitionOutDurationInput.value) || 0.22);
     const inDur = Math.max(0.02, parseFloat(transitionInDurationInput.value) || 0.22);
     previewSingleText.dataset.effect = effect;
-    previewPanel.style.setProperty('--preview-transition-duration', outDur + 's');
+    document.documentElement.style.setProperty('--preview-transition-duration', outDur + 's');
     previewSingleText.classList.add('transition-out');
     lineTransitionTimer = setTimeout(function(){
       setSingleLineContent(text);
-      previewPanel.style.setProperty('--preview-transition-duration', inDur + 's');
+      document.documentElement.style.setProperty('--preview-transition-duration', inDur + 's');
       void previewSingleText.offsetWidth; // force reflow so the "in" transition actually animates
       previewSingleText.classList.remove('transition-out');
       lineTransitionTimer = null;
