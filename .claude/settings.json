@@ -4,7 +4,13 @@
       "Bash(node -e ' *)",
       "Bash(git commit -m ' *)",
       "Bash(node --check /tmp/check7.js)",
-      "Bash(node --check /tmp/check8.js)"
+      "Bash(node --check /tmp/check8.js)",
+      "Bash(node test_threeparticleburst.js)",
+      "Bash(node test_threeglitchcube_export.js)",
+      "Bash(node test_threeparticleburst_export.js)",
+      "Bash(git -C /Users/juni/Documents/GitHub/srt-maker diff .claude/settings.json)",
+      "Bash(git -C /Users/juni/Documents/GitHub/srt-maker diff --stat src/index.html)",
+      "Bash(git -C /Users/juni/Documents/GitHub/srt-maker add src/index.html)"
     ]
   }
 }
