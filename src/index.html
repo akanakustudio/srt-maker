@@ -417,6 +417,12 @@
   .eq-controls{
     display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px;
   }
+  .three-eq-controls{display:none;}
+  .three-eq-controls.visible{display:contents;}
+  .three-eq-controls-heading{
+    flex:0 0 100%;font-size:11px;color:var(--muted2);border-top:1px solid var(--line);
+    padding-top:8px;margin-top:2px;
+  }
 
   .export-controls{
     display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px;
@@ -757,7 +763,7 @@
           <div class="preview-all" id="previewAll" style="display:none"></div>
         </div>
       </div>
-      <details class="param-section" open>
+      <details class="param-section" id="paramSectionStyleIO">
         <summary class="param-section-head"><span>プレビュー設定の保存/読込</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></summary>
         <div class="style-io-controls" id="styleIoControls">
           <button class="toggle-btn" type="button" id="previewStyleSaveBtn">プレビュー設定を保存</button>
@@ -766,7 +772,7 @@
           <span class="hint">フォント・背景・グラフィックイコライザーなど、歌詞プレビューの設定一式を保存/読み込みします（背景の画像・動画そのものは含みません）</span>
         </div>
       </details>
-      <details class="param-section" open>
+      <details class="param-section" id="paramSectionFont">
         <summary class="param-section-head"><span>フォント・文字スタイル</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></summary>
         <div class="preview-controls">
           <label class="preview-control">
@@ -889,7 +895,7 @@
           <div class="bookmark-chip-list" id="fontBookmarkList"></div>
         </div>
       </details>
-      <details class="param-section" open>
+      <details class="param-section" id="paramSectionBg">
         <summary class="param-section-head"><span>背景（画像/動画）</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></summary>
         <div class="bg-controls" id="bgControls">
           <label class="toggle-btn" for="previewBgInput">背景を設定（画像/動画）</label>
@@ -934,7 +940,7 @@
           </label>
         </div>
       </details>
-      <details class="param-section" open>
+      <details class="param-section" id="paramSectionEq">
         <summary class="param-section-head"><span>グラフィックイコライザー</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></summary>
         <div class="eq-controls" id="eqControls">
           <button class="toggle-btn" type="button" id="previewEqToggle">グラフィックイコライザーを表示</button>
@@ -1104,7 +1110,7 @@
           </label>
           <label class="preview-control">
             <span>なめらかさ</span>
-            <input type="range" id="eqSmoothing" min="0" max="0.95" step="0.05" value="0.8">
+            <input type="range" id="eqSmoothing" min="0" max="0.95" step="0.05" value="0.55">
           </label>
           <label class="preview-control" title="曲が静かでEQがあまり動かない時は上げてください">
             <span>感度（基準レベル）</span>
@@ -1142,6 +1148,41 @@
             <span>EQ高さ</span>
             <input type="range" id="eqHeight" min="10" max="100" step="5" value="100">
           </label>
+          <div class="three-eq-controls" id="threeEqControls">
+            <div class="three-eq-controls-heading">3D詳細設定（Three.js系EQ専用）</div>
+            <label class="preview-control">
+              <span>回転速度</span>
+              <input type="range" id="threeRotationSpeed" min="-3" max="3" step="0.1" value="1">
+            </label>
+            <label class="preview-control">
+              <span>回転軸</span>
+              <select id="threeRotationAxis">
+                <option value="y">水平（Y軸）</option>
+                <option value="x">垂直（X軸）</option>
+                <option value="z">奥行き（Z軸）</option>
+                <option value="free">フリー（複合）</option>
+              </select>
+            </label>
+            <label class="preview-control">
+              <span>カラー割り当て</span>
+              <select id="threeColorMode">
+                <option value="position">位置基準</option>
+                <option value="amplitude">音量基準</option>
+              </select>
+            </label>
+            <label class="preview-control" title="3D形状が音にどれだけ強く反応するかを調整します">
+              <span>反応感度</span>
+              <input type="range" id="threeReactivity" min="0.2" max="3" step="0.1" value="1">
+            </label>
+            <label class="preview-control" title="明暗のメリハリを調整します。上げるとハイライトの白飛びが抑えられ、選んだカラーパターンがはっきり見えるようになります">
+              <span>明暗（コントラスト）</span>
+              <input type="range" id="threeContrast" min="0.2" max="2.5" step="0.1" value="1.6">
+            </label>
+            <label class="preview-control" title="バー・キューブ・スパイクなど各要素の太さ/奥行きを調整します">
+              <span>バー太さ</span>
+              <input type="range" id="threeThickness" min="0.3" max="2.5" step="0.1" value="1">
+            </label>
+          </div>
           <button class="toggle-btn" type="button" id="eqAutoStyleBtn">曲の雰囲気から自動生成</button>
           <div class="preview-control bookmark-row">
             <span>EQブックマーク</span>
@@ -1150,7 +1191,7 @@
           <div class="bookmark-chip-list" id="eqBookmarkList"></div>
         </div>
       </details>
-      <details class="param-section" open>
+      <details class="param-section" id="paramSectionExport">
         <summary class="param-section-head"><span>動画書き出し</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></summary>
         <div class="export-controls" id="exportControls">
           <label class="preview-control">
@@ -5439,15 +5480,11 @@ export function createThreeEq(){
     lastColorEnd = colorEndHex;
     tmpColorA.set(colorStartHex);
     tmpColorB.set(colorEndHex);
-    bars.forEach(function(mesh, i){
-      const t = i / ((bars.length - 1) || 1);
-      const c = tmpColorA.clone().lerp(tmpColorB, t);
-      mesh.material.color.copy(c);
-      mesh.material.emissive.copy(c).multiplyScalar(0.35);
-    });
     light1.color.copy(tmpColorA);
     light2.color.copy(tmpColorB);
   }
+
+  const tmpColorC = new THREE.Color();
 
   function update(values, eqStyle, w, h){
     if(w !== lastW || h !== lastH){
@@ -5460,22 +5497,33 @@ export function createThreeEq(){
       applyColors(eqStyle.colorStart, eqStyle.colorEnd);
     }
 
+    const reactivity = eqStyle.threeReactivity || 1;
+    const contrast = eqStyle.threeContrast || 1;
+    const thickness = eqStyle.threeThickness || 1;
+    const colorByAmplitude = eqStyle.threeColorMode === 'amplitude';
+    ambient.intensity = 0.4 / Math.max(0.5, contrast);
     const n = Math.min(values.length, bars.length);
     for(let i = 0; i < n; i++){
       const v = values[i];
-      const targetHeight = 0.25 + v * 5.4;
+      const vc = threeContrastCurve(v, contrast);
+      const targetHeight = 0.25 + v * reactivity * 5.4;
       const mesh = bars[i];
       mesh.scale.y += (targetHeight - mesh.scale.y) * 0.35;
+      mesh.scale.x = mesh.scale.z = thickness;
       mesh.position.y = -0.5 + (mesh.scale.y - 1) / 2;
-      mesh.material.emissiveIntensity = 0.4 + v * 1.6;
+      mesh.material.emissiveIntensity = (0.15 + vc * 1.85) * contrast;
+
+      const t = colorByAmplitude ? v : i / (n - 1 || 1);
+      tmpColorC.copy(tmpColorA).lerp(tmpColorB, t);
+      mesh.material.color.copy(tmpColorC);
+      mesh.material.emissive.copy(tmpColorC).multiplyScalar(0.35);
     }
 
     const elapsed = (performance.now() - startTime) / 1000;
-    const camAngle = elapsed * 0.15;
+    const camAngle = elapsed * 0.15 * (eqStyle.threeRotationSpeed || 1);
     const camRadius = 11;
-    camera.position.x = Math.sin(camAngle) * camRadius;
-    camera.position.z = Math.cos(camAngle) * camRadius;
-    camera.position.y = 5 + Math.sin(elapsed * 0.3) * 1.2;
+    const off = threeOrbitOffset(eqStyle.threeRotationAxis, camAngle, camRadius);
+    camera.position.set(off.x, 5 + off.y + Math.sin(elapsed * 0.3) * 1.2, off.z);
     camera.lookAt(0, 0.2, 0);
 
     renderer.render(scene, camera);
@@ -5575,6 +5623,12 @@ export function createThreeWaveGrid(){
     tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
     light1.color.copy(tmpColorA);
     light2.color.copy(tmpColorB);
+    // The material's own emissive base color was a fixed, unrelated teal
+    // that never changed with the selected color pattern - for cubes with
+    // little direct diffuse light hitting them (short/quiet ones) that
+    // fixed tint dominated over whatever pattern was actually picked, which
+    // is why switching color patterns barely seemed to do anything.
+    cubeMat.emissive.copy(tmpColorA).multiplyScalar(0.35);
   }
 
   function update(values, eqStyle, w, h){
@@ -5596,6 +5650,11 @@ export function createThreeWaveGrid(){
     }
     resampleInto(history[0], values);
 
+    const reactivity = eqStyle.threeReactivity || 1;
+    const contrast = eqStyle.threeContrast || 1;
+    const thickness = eqStyle.threeThickness || 1;
+    const colorByAmplitude = eqStyle.threeColorMode === 'amplitude';
+    ambient.intensity = 0.65 / Math.max(0.5, contrast);
     let frontSum = 0;
     for(let r = 0; r < ROWS; r++){
       const row = history[r];
@@ -5606,34 +5665,35 @@ export function createThreeWaveGrid(){
         const idx = r * COLS + c;
         const v = row[c];
         if(r === 0) frontSum += v;
-        const targetH = MIN_H + v * MAX_H;
+        const targetH = MIN_H + v * reactivity * MAX_H;
         heights[idx] += (targetH - heights[idx]) * smoothing;
         const hgt = Math.max(MIN_H, heights[idx]);
 
         dummy.position.set(xOf(c), hgt / 2, z);
-        dummy.scale.set(1, hgt, 1);
+        dummy.scale.set(thickness, hgt, thickness);
         dummy.updateMatrix();
         mesh.setMatrixAt(idx, dummy.matrix);
 
-        const t = c / (COLS - 1 || 1);
+        const t = colorByAmplitude ? v : c / (COLS - 1 || 1);
         cellColor.copy(tmpColorA).lerp(tmpColorB, t);
-        cellColor.lerp(WHITE, Math.min(0.55, v * 0.5));
+        cellColor.lerp(WHITE, Math.min(0.55, v * 0.5) / contrast);
         cellColor.multiplyScalar(fade);
         mesh.setColorAt(idx, cellColor);
       }
     }
     mesh.instanceMatrix.needsUpdate = true;
     if(mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    cubeMat.emissiveIntensity = 0.4 + (frontSum / COLS) * 1.3;
+    cubeMat.emissiveIntensity = (0.4 + (frontSum / COLS) * 1.3) * contrast;
 
     const elapsed = (now - startTime) / 1000;
-    // Slow continuous 360-degree horizontal orbit around the grid's center
-    // (a full revolution takes about a minute), at the same elevated
+    // Slow continuous 360-degree orbit around the grid's center (a full
+    // revolution takes about a minute at speed 1), at the same elevated
     // downward-looking angle used before so the grid stays readable no
     // matter which side is currently facing the camera.
-    const orbitAngle = elapsed * (Math.PI * 2 / 60);
+    const orbitAngle = elapsed * (Math.PI * 2 / 60) * (eqStyle.threeRotationSpeed || 1);
     const orbitRadius = 9.6;
-    camera.position.set(Math.sin(orbitAngle) * orbitRadius, 11.5, Math.cos(orbitAngle) * orbitRadius);
+    const off = threeOrbitOffset(eqStyle.threeRotationAxis, orbitAngle, orbitRadius);
+    camera.position.set(off.x, 11.5 + off.y, off.z);
     camera.lookAt(0, -1, 0);
 
     renderer.render(scene, camera);
@@ -5665,6 +5725,38 @@ export function createThreeWaveGrid(){
 // Three.js post-processing (bloom) is needed. Exposed the same way as the
 // other Three.js EQ styles: an (values, eqStyle, w, h) update() call driving
 // an offscreen canvas composited in via ctx.drawImage().
+
+// Shared helper for the "回転軸" (rotation axis) control common to every
+// Three.js EQ style: given an accumulated angle and orbit radius, returns
+// the camera offset for an orbit around the chosen world axis (the circle
+// always lies in the plane perpendicular to that axis). 'free' tumbles by
+// combining the Y-axis orbit with a slower secondary sway on X, so it isn't
+// a flat circle. Callers add their own style-specific elevation/offset on
+// top of this.
+function threeOrbitOffset(axis, angle, radius){
+  if(axis === 'x') return { x: 0, y: Math.sin(angle) * radius, z: Math.cos(angle) * radius };
+  if(axis === 'z') return { x: Math.sin(angle) * radius, y: Math.cos(angle) * radius, z: 0 };
+  if(axis === 'free'){
+    return {
+      x: Math.sin(angle) * radius,
+      y: Math.sin(angle * 0.37) * radius * 0.4,
+      z: Math.cos(angle) * radius
+    };
+  }
+  return { x: Math.sin(angle) * radius, y: 0, z: Math.cos(angle) * radius }; // 'y' (default)
+}
+
+// Shared "明暗（コントラスト）" curve: at contrast=1 this is the identity, at
+// higher contrast it pushes quiet/dim values further down while leaving loud
+// values relatively high (more separation between highlight and shadow), and
+// at lower contrast it flattens everything toward mid-brightness. Used to
+// scale brightness/emissive terms and to scale back the "blend toward white"
+// amount several styles use for highlights - that white blend was strong
+// enough by default to wash out whichever color pattern was selected, which
+// is also why picking a new color pattern barely seemed to change anything.
+function threeContrastCurve(v, contrast){
+  return Math.pow(Math.max(0, Math.min(1, v)), contrast);
+}
 
 // Compact 3D simplex noise (public-domain algorithm, Stefan Gustavson /
 // Ashima Arts), self-contained so the app stays a single file with no
@@ -5788,11 +5880,16 @@ export function createThreeSpikeOrb(){
   let camAngleAccum = 0;
   let lastElapsed = 0;
 
+  const WHITE_C = new THREE.Color(0xffffff);
+
   function applyColors(colorStartHex, colorEndHex){
     lastColorStart = colorStartHex; lastColorEnd = colorEndHex;
     tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
     light2.color.copy(tmpColorB);
-    coreMat.color.copy(tmpColorA).lerp(new THREE.Color(0xffffff), 0.5);
+    // Same fix as the other styles: the wireframe's emissive base was a
+    // fixed, unrelated teal that overpowered whatever color pattern was
+    // actually selected.
+    mat.emissive.copy(tmpColorA).multiplyScalar(0.4);
   }
 
   function update(values, eqStyle, w, h){
@@ -5817,6 +5914,11 @@ export function createThreeSpikeOrb(){
     punch = Math.max(peak, punch * 0.86);
 
     const elapsed = (performance.now() - startTime) / 1000;
+    const reactivity = eqStyle.threeReactivity || 1;
+    const contrast = eqStyle.threeContrast || 1;
+    const colorByAmplitude = eqStyle.threeColorMode === 'amplitude';
+    ambient.intensity = 0.55 / Math.max(0.5, contrast);
+    coreMat.color.copy(tmpColorA).lerp(WHITE_C, 0.5 / contrast);
     const colorAttr = geo.attributes.color;
     for(let i = 0; i < vertexCount; i++){
       const dx = baseDirs[i*3], dy = baseDirs[i*3+1], dz = baseDirs[i*3+2];
@@ -5836,23 +5938,24 @@ export function createThreeSpikeOrb(){
       const barIdx = Math.min(n - 1, Math.floor(longitude * n));
       const bandLevel = n ? values[barIdx] : 0;
 
-      const rawBump = organic * (0.14 + smoothedLevel * 0.6 + punch * 0.35)
-        + bandLevel * 0.75 * (0.35 + Math.abs(nFine) * 0.65);
+      const rawBump = reactivity * (organic * (0.14 + smoothedLevel * 0.6 + punch * 0.35)
+        + bandLevel * 0.75 * (0.35 + Math.abs(nFine) * 0.65));
       const bump = Math.max(-0.35, Math.min(0.85, rawBump));
       const radius = RADIUS * (1 + bump);
 
       posAttr.setXYZ(i, dx * radius, dy * radius, dz * radius);
 
       const highlight = Math.max(0, Math.min(1, bump * 1.6 + bandLevel * 0.3));
-      cellColor.copy(tmpColorA).lerp(tmpColorB, dir.set(dx, dy, dz).y * 0.5 + 0.5);
-      cellColor.lerp(new THREE.Color(0xffffff), highlight * 0.6);
+      const t = colorByAmplitude ? Math.max(0, Math.min(1, bandLevel)) : (dir.set(dx, dy, dz).y * 0.5 + 0.5);
+      cellColor.copy(tmpColorA).lerp(tmpColorB, t);
+      cellColor.lerp(WHITE_C, (highlight * 0.6) / contrast);
       colorAttr.setXYZ(i, cellColor.r, cellColor.g, cellColor.b);
     }
     posAttr.needsUpdate = true;
     colorAttr.needsUpdate = true;
     geo.computeVertexNormals();
 
-    mat.emissiveIntensity = 0.4 + smoothedLevel * 1.1 + punch * 0.6;
+    mat.emissiveIntensity = (0.4 + smoothedLevel * 1.1 + punch * 0.6) * contrast;
     coreMesh.scale.setScalar(1 + smoothedLevel * 0.12 + punch * 0.1);
     coreMat.opacity = 0.12 + smoothedLevel * 0.22 + punch * 0.15;
 
@@ -5862,13 +5965,12 @@ export function createThreeSpikeOrb(){
     // perfectly smoothly (no jump-cuts) around the orb.
     const dt = Math.max(0, Math.min(0.1, elapsed - lastElapsed));
     lastElapsed = elapsed;
-    const angVel = noise(elapsed * 0.05, 12.3, 0) * 0.55;
+    const angVel = noise(elapsed * 0.05, 12.3, 0) * 0.55 * (eqStyle.threeRotationSpeed || 1);
     camAngleAccum += angVel * dt;
     const elevWander = noise(elapsed * 0.045, -8.1, 0);
     const camRadius = 12;
-    camera.position.x = Math.sin(camAngleAccum) * camRadius;
-    camera.position.z = Math.cos(camAngleAccum) * camRadius;
-    camera.position.y = elevWander * camRadius * 0.3;
+    const off = threeOrbitOffset(eqStyle.threeRotationAxis, camAngleAccum, camRadius);
+    camera.position.set(off.x, off.y + elevWander * camRadius * 0.3, off.z);
     camera.lookAt(0, 0, 0);
     wireMesh.rotation.y = elapsed * 0.05;
     coreMesh.rotation.y = -elapsed * 0.03;
@@ -6015,6 +6117,7 @@ export function createThreeGridBox(){
     tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
     light1.color.copy(tmpColorA);
     light2.color.copy(tmpColorB);
+    needleMat.emissive.copy(tmpColorA).multiplyScalar(0.35);
   }
 
   function update(values, eqStyle, w, h){
@@ -6036,6 +6139,11 @@ export function createThreeGridBox(){
     }
     resampleInto(history[0], values);
 
+    const reactivity = eqStyle.threeReactivity || 1;
+    const contrast = eqStyle.threeContrast || 1;
+    const thickness = eqStyle.threeThickness || 1;
+    const colorByAmplitude = eqStyle.threeColorMode === 'amplitude';
+    ambient.intensity = 0.5 / Math.max(0.5, contrast);
     let frontSum = 0;
     for(let r = 0; r < ROWS; r++){
       const row = history[r];
@@ -6046,28 +6154,35 @@ export function createThreeGridBox(){
         const idx = r * COLS + c;
         const v = row[c];
         if(r === 0) frontSum += v;
-        const targetH = MIN_H + v * MAX_H;
+        const targetH = MIN_H + v * reactivity * MAX_H;
         heights[idx] += (targetH - heights[idx]) * smoothing;
         const hgt = Math.max(MIN_H, heights[idx]);
 
         dummy.position.set(xOf(c), hgt / 2, z);
-        dummy.scale.set(1, hgt, 1);
+        dummy.scale.set(thickness, hgt, thickness);
         dummy.updateMatrix();
         mesh.setMatrixAt(idx, dummy.matrix);
 
-        const t = c / (COLS - 1 || 1);
+        const t = colorByAmplitude ? v : c / (COLS - 1 || 1);
         cellColor.copy(tmpColorA).lerp(tmpColorB, t);
-        cellColor.lerp(WHITE, Math.min(0.6, v * 0.55));
+        cellColor.lerp(WHITE, Math.min(0.6, v * 0.55) / contrast);
         cellColor.multiplyScalar(fade);
         mesh.setColorAt(idx, cellColor);
       }
     }
     mesh.instanceMatrix.needsUpdate = true;
     if(mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    needleMat.emissiveIntensity = 0.5 + (frontSum / COLS) * 1.2;
+    needleMat.emissiveIntensity = (0.5 + (frontSum / COLS) * 1.2) * contrast;
 
     const elapsed = (now - startTime) / 1000;
-    group.rotation.y = elapsed * 0.18;
+    const rotSpeed = eqStyle.threeRotationSpeed || 1;
+    const rotAxis = eqStyle.threeRotationAxis || 'y';
+    const rotAngle = elapsed * 0.18 * rotSpeed;
+    group.rotation.set(0, 0, 0);
+    if(rotAxis === 'x') group.rotation.x = rotAngle;
+    else if(rotAxis === 'z') group.rotation.z = rotAngle;
+    else if(rotAxis === 'free'){ group.rotation.y = rotAngle; group.rotation.x = Math.sin(elapsed * 0.07) * 0.3; }
+    else group.rotation.y = rotAngle;
 
     camera.position.set(0, 3.6, 10.8);
     camera.lookAt(0, 0, 0);
@@ -6178,6 +6293,7 @@ export function createThreeSpikeTower(){
     tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
     light1.color.copy(tmpColorA).lerp(WHITE, 0.6);
     light2.color.copy(tmpColorB);
+    spikeMat.emissive.copy(tmpColorA).multiplyScalar(0.35);
   }
 
   function update(values, eqStyle, w, h){
@@ -6193,6 +6309,11 @@ export function createThreeSpikeTower(){
 
     const n = values.length;
     const elapsed = (performance.now() - startTime) / 1000;
+    const reactivity = eqStyle.threeReactivity || 1;
+    const contrast = eqStyle.threeContrast || 1;
+    const thickness = eqStyle.threeThickness || 1;
+    const colorByAmplitude = eqStyle.threeColorMode === 'amplitude';
+    ambient.intensity = 0.4 / Math.max(0.5, contrast);
     let peakAll = 0;
 
     for(let i = 0; i < N; i++){
@@ -6206,27 +6327,28 @@ export function createThreeSpikeTower(){
       spikePunch[i] = Math.max(v, spikePunch[i] * 0.78);
 
       const jitter = noise(angles[i] * 2, elapsed * 0.6, i * 0.01) * 0.06;
-      const targetH = MIN_H + Math.max(0, spikePunch[i] + jitter) * MAX_H;
+      const targetH = MIN_H + Math.max(0, spikePunch[i] + jitter) * reactivity * MAX_H;
       const rising = targetH > heights[i];
       heights[i] += (targetH - heights[i]) * (rising ? 0.65 : 0.22);
       const hgt = Math.max(MIN_H, heights[i]);
 
       dummy.position.set(positions[i * 2], hgt / 2, positions[i * 2 + 1]);
       dummy.rotation.set(0, angles[i], 0);
-      dummy.scale.set(1, hgt, 1);
+      dummy.scale.set(thickness, hgt, thickness);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
 
       const heat = Math.min(1, spikePunch[i] * 1.3);
-      cellColor.copy(tmpColorA).lerp(tmpColorB, i / (N - 1));
-      cellColor.lerp(WHITE, heat * 0.7);
+      const t = colorByAmplitude ? Math.min(1, spikePunch[i]) : i / (N - 1);
+      cellColor.copy(tmpColorA).lerp(tmpColorB, t);
+      cellColor.lerp(WHITE, (heat * 0.7) / contrast);
       mesh.setColorAt(i, cellColor);
     }
     mesh.instanceMatrix.needsUpdate = true;
     if(mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 
     globalPunch = Math.max(peakAll, globalPunch * 0.82);
-    spikeMat.emissiveIntensity = 0.55 + globalPunch * 1.4;
+    spikeMat.emissiveIntensity = (0.55 + globalPunch * 1.4) * contrast;
 
     // Beat "kick": a brief FOV punch-in plus a light-intensity flash on
     // transients, on top of the constantly-wandering orbit.
@@ -6236,11 +6358,12 @@ export function createThreeSpikeTower(){
 
     const dt = Math.max(0, Math.min(0.1, elapsed - lastElapsed));
     lastElapsed = elapsed;
-    const angVel = 0.16 + noise(elapsed * 0.05, 30.1, 0) * 0.22;
+    const angVel = (0.16 + noise(elapsed * 0.05, 30.1, 0) * 0.22) * (eqStyle.threeRotationSpeed || 1);
     camAngleAccum += angVel * dt;
     const camDist = 10.5 - globalPunch * 0.8;
     const elev = 4.6 + noise(elapsed * 0.04, -20.4, 0) * 1.1;
-    camera.position.set(Math.sin(camAngleAccum) * camDist, elev, Math.cos(camAngleAccum) * camDist);
+    const off = threeOrbitOffset(eqStyle.threeRotationAxis, camAngleAccum, camDist);
+    camera.position.set(off.x, elev + off.y, off.z);
     camera.lookAt(0, 0.6, 0);
 
     renderer.render(scene, camera);
@@ -6349,6 +6472,7 @@ export function createThreeGlitchCube(){
     tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
     light1.color.copy(tmpColorA).lerp(WHITE, 0.5);
     light2.color.copy(tmpColorB);
+    cubeMat.emissive.copy(tmpColorA).multiplyScalar(0.35);
   }
 
   function update(values, eqStyle, w, h){
@@ -6366,6 +6490,11 @@ export function createThreeGlitchCube(){
     const elapsed = (performance.now() - startTime) / 1000;
     const dt = Math.max(0, Math.min(0.1, elapsed - lastElapsed));
     lastElapsed = elapsed;
+    const reactivity = eqStyle.threeReactivity || 1;
+    const contrast = eqStyle.threeContrast || 1;
+    const thickness = eqStyle.threeThickness || 1;
+    const colorByAmplitude = eqStyle.threeColorMode === 'amplitude';
+    ambient.intensity = 0.95 / Math.max(0.5, contrast);
     let peakAll = 0;
 
     for(let i = 0; i < N; i++){
@@ -6379,7 +6508,7 @@ export function createThreeGlitchCube(){
         const dur = 0.12 + Math.random() * 0.16;
         glitchT[i] = dur;
         glitchDur[i] = dur;
-        const amt = (0.6 + v * 1.8) * SPACING;
+        const amt = (0.6 + v * 1.8) * reactivity * SPACING;
         offX[i] = (Math.random() * 2 - 1) * amt;
         offY[i] = (Math.random() * 2 - 1) * amt;
         offZ[i] = (Math.random() * 2 - 1) * amt;
@@ -6403,26 +6532,33 @@ export function createThreeGlitchCube(){
 
       dummy.position.set(px, py, pz);
       dummy.rotation.set(rx, ry, rz);
-      dummy.scale.setScalar(scale);
+      dummy.scale.setScalar(scale * thickness);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
 
-      const t2 = i / (N - 1);
+      const t2 = colorByAmplitude ? Math.min(1, v) : i / (N - 1);
       cellColor.copy(tmpColorA).lerp(tmpColorB, t2);
-      cellColor.lerp(WHITE, 0.25 + flash * 0.75);
+      cellColor.lerp(WHITE, (0.25 + flash * 0.75) / contrast);
       mesh.setColorAt(i, cellColor);
     }
     mesh.instanceMatrix.needsUpdate = true;
     if(mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 
     globalPunch = Math.max(peakAll, globalPunch * 0.85);
-    cubeMat.emissiveIntensity = 0.45 + globalPunch * 1.1;
+    cubeMat.emissiveIntensity = (0.45 + globalPunch * 1.1) * contrast;
     light1.intensity = 3 + globalPunch * 4.5;
 
-    group.rotation.y = elapsed * 0.12 + Math.sin(elapsed * 0.31) * 0.08;
-    group.rotation.x = Math.sin(elapsed * 0.17) * 0.08;
+    const rotSpeed = eqStyle.threeRotationSpeed || 1;
+    const rotAxis = eqStyle.threeRotationAxis || 'y';
+    group.rotation.set(0, 0, 0);
+    if(rotAxis === 'x') group.rotation.x = elapsed * 0.12 * rotSpeed;
+    else if(rotAxis === 'z') group.rotation.z = elapsed * 0.12 * rotSpeed;
+    else if(rotAxis === 'free'){
+      group.rotation.y = elapsed * 0.12 * rotSpeed + Math.sin(elapsed * 0.31) * 0.08;
+      group.rotation.x = Math.sin(elapsed * 0.17) * 0.08;
+    } else group.rotation.y = elapsed * 0.12 * rotSpeed;
 
-    const angVel = 0.1 + noise(elapsed * 0.04, 71.2, 0) * 0.1;
+    const angVel = (0.1 + noise(elapsed * 0.04, 71.2, 0) * 0.1) * rotSpeed;
     camAngleAccum += angVel * dt;
     const camDist = 8.2 - globalPunch * 0.5;
     camera.position.set(Math.sin(camAngleAccum) * camDist, 2.4 + Math.sin(elapsed * 0.13) * 0.6, Math.cos(camAngleAccum) * camDist);
@@ -6524,6 +6660,9 @@ export function createThreeParticleBurst(){
   const cellColor = new THREE.Color();
   const WHITE = new THREE.Color(0xffffff);
 
+  let colorByAmplitude = false;
+  let currentContrast = 1;
+
   function applyColors(colorStartHex, colorEndHex){
     lastColorStart = colorStartHex; lastColorEnd = colorEndHex;
     tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
@@ -6535,8 +6674,8 @@ export function createThreeParticleBurst(){
       nextSpawn = (nextSpawn + 1) % POOL;
       age[i] = 0;
       speed[i] = (2.2 + Math.random() * 2.4) * (0.5 + strength);
-      const t = n ? bin / n : 0;
-      cellColor.copy(tmpColorA).lerp(tmpColorB, t).lerp(WHITE, Math.min(0.5, strength * 0.5));
+      const t = colorByAmplitude ? Math.min(1, strength) : (n ? bin / n : 0);
+      cellColor.copy(tmpColorA).lerp(tmpColorB, t).lerp(WHITE, Math.min(0.5, strength * 0.5) / currentContrast);
       partColorR[i] = cellColor.r; partColorG[i] = cellColor.g; partColorB[i] = cellColor.b;
     }
   }
@@ -6556,6 +6695,10 @@ export function createThreeParticleBurst(){
     const elapsed = (performance.now() - startTime) / 1000;
     const dt = Math.max(0, Math.min(0.1, elapsed - lastElapsed));
     lastElapsed = elapsed;
+    const reactivity = eqStyle.threeReactivity || 1;
+    colorByAmplitude = eqStyle.threeColorMode === 'amplitude';
+    currentContrast = eqStyle.threeContrast || 1;
+    mat.size = 0.16 * (eqStyle.threeThickness || 1);
 
     // Onset detection per frequency band -> a burst of fresh particles
     // fired for that band; a low-level continuous trickle keeps the ring
@@ -6580,7 +6723,7 @@ export function createThreeParticleBurst(){
       }
       const tNorm = age[i] / LIFESPAN;
       const eased = 1 - Math.pow(1 - tNorm, 3); // easeOutCubic
-      const r = eased * speed[i] * (MAX_RANGE / 4.6);
+      const r = eased * speed[i] * (MAX_RANGE / 4.6) * reactivity;
       posArr[i*3] = dirX[i] * r;
       posArr[i*3+1] = dirY[i] * r;
       posArr[i*3+2] = dirZ[i] * r;
@@ -6592,12 +6735,21 @@ export function createThreeParticleBurst(){
     geo.attributes.position.needsUpdate = true;
     geo.attributes.color.needsUpdate = true;
 
-    const angVel = 0.06 + Math.sin(elapsed * 0.09) * 0.05;
+    const rotSpeed = eqStyle.threeRotationSpeed || 1;
+    const angVel = (0.06 + Math.sin(elapsed * 0.09) * 0.05) * rotSpeed;
     camAngleAccum += angVel * dt;
     const camDist = 9;
     camera.position.set(Math.sin(camAngleAccum) * camDist * 0.35, Math.sin(elapsed * 0.07) * 1.2, camDist);
     camera.lookAt(0, 0, 0);
-    points.rotation.y = elapsed * 0.05;
+
+    const rotAxis = eqStyle.threeRotationAxis || 'y';
+    points.rotation.set(0, 0, 0);
+    if(rotAxis === 'x') points.rotation.x = elapsed * 0.05 * rotSpeed;
+    else if(rotAxis === 'z') points.rotation.z = elapsed * 0.05 * rotSpeed;
+    else if(rotAxis === 'free'){
+      points.rotation.y = elapsed * 0.05 * rotSpeed;
+      points.rotation.x = Math.sin(elapsed * 0.09) * 0.25;
+    } else points.rotation.y = elapsed * 0.05 * rotSpeed;
 
     renderer.render(scene, camera);
   }
@@ -6790,6 +6942,13 @@ export function createThreeParticleBurst(){
   const eqPosYSelect = document.getElementById('eqPosY');
   const eqWidthInput = document.getElementById('eqWidth');
   const eqHeightInput = document.getElementById('eqHeight');
+  const threeEqControls = document.getElementById('threeEqControls');
+  const threeRotationSpeedInput = document.getElementById('threeRotationSpeed');
+  const threeRotationAxisSelect = document.getElementById('threeRotationAxis');
+  const threeColorModeSelect = document.getElementById('threeColorMode');
+  const threeReactivityInput = document.getElementById('threeReactivity');
+  const threeContrastInput = document.getElementById('threeContrast');
+  const threeThicknessInput = document.getElementById('threeThickness');
   const eqAutoStyleBtn = document.getElementById('eqAutoStyleBtn');
   const eqBookmarkAddBtn = document.getElementById('eqBookmarkAddBtn');
   const eqBookmarkList = document.getElementById('eqBookmarkList');
@@ -7316,14 +7475,20 @@ export function createThreeParticleBurst(){
     colorStart: '#7fe9db',
     colorEnd: '#33d6c0',
     barCount: 40,
-    smoothing: 0.8,
+    smoothing: 0.55,
     glow: 0.4,
     posX: 'center',
     posY: 'center',
     width: 100,
     height: 100,
-    sensitivity: 1.5,
-    opacity: 1
+    sensitivity: 1,
+    opacity: 1,
+    threeRotationSpeed: 1,
+    threeRotationAxis: 'y',
+    threeColorMode: 'position',
+    threeReactivity: 1,
+    threeContrast: 1.6,
+    threeThickness: 1
   };
 
   function clamp(v, min, max){ return Math.min(max, Math.max(min, v)); }
@@ -7342,14 +7507,18 @@ export function createThreeParticleBurst(){
   // How much to boost higher-frequency bars: music energy naturally rolls off
   // toward the high end, so without this the right side of the display reads
   // as flat/unreactive even though there is audible (quieter) high-frequency content.
-  const EQ_HIGH_FREQ_BOOST = 2.2;
+  const EQ_HIGH_FREQ_BOOST = 1.4;
   // Perceptual (gamma) compression applied before the boost: linear byte-value
   // scaling makes genuinely-present-but-quiet frequency content (most real music's
   // treble, or anything near a bar's start/end) look like a dead gap, especially
   // in circular/radial layouts where bar 0 and the last bar sit right next to each
   // other. An exponent < 1 lifts quiet content much more than loud content, closer
   // to how loudness is perceived and how commercial visualizers scale their bars.
-  const EQ_GAMMA = 0.55;
+  // Kept much gentler than a "textbook" perceptual curve now that the
+  // auto-gain ceiling above already guarantees the track's own loud peak
+  // reaches ~1.0 - a strong lift here on top of that would flatten out the
+  // very quiet-vs-loud contrast the auto-gain exists to preserve.
+  const EQ_GAMMA = 0.95;
   // Real mixes carry essentially no energy near true Nyquist (~20-22kHz once
   // mastering/lossy-encoding rolloff is accounted for), so dedicating the very
   // last bar to that near-silent sliver made it read as permanently dead
@@ -7403,6 +7572,32 @@ export function createThreeParticleBurst(){
     previewEqCanvas.height = Math.max(1, Math.round(rect.height));
   }
 
+  // Auto-gain ceiling: tracks how loud the track has recently been, in the
+  // *raw, unboosted* linear byte-peak ratio (0..1) — deliberately computed
+  // before EQ_HIGH_FREQ_BOOST and EQ_GAMMA are applied. Using the boosted,
+  // gamma-lifted per-bar display values here was the original bug: the
+  // high-frequency boost (up to 2.2x) pushes individual bars to clip at
+  // their own max essentially every frame regardless of whether the track
+  // is actually loud right now, so a ceiling built from those values was
+  // permanently pinned near 1.0 and could never tell quiet from loud.
+  // Rises instantly to a new peak, decays slowly otherwise. Every bar value
+  // is then scaled relative to this, so the EQ always uses its full visual
+  // range regardless of how the track is mastered, and `sensitivity` always
+  // has a direct, visible effect instead of being absorbed by clipping.
+  let eqAutoGainCeil = 0.3;
+  const EQ_AUTO_GAIN_FLOOR = 0.1;
+  // Deliberately a very slow decay (tens of seconds, not a few): this only
+  // exists to correct for a *track's* overall mastering loudness (a quiet
+  // old recording vs. a loud modern master), not to track a *song's* own
+  // verse/chorus dynamics. A fast-adapting ceiling would "catch up" to a
+  // quiet passage within a second or two and normalize it back up to the
+  // same visual intensity as the loud passage right before it - defeating
+  // the entire point, since the complaint this is fixing was that quiet and
+  // loud moments looked almost identical. Anchoring the ceiling near the
+  // track's recent loud peak and only letting it drift down slowly is what
+  // lets a quiet verse actually read as quiet relative to it.
+  const EQ_AUTO_GAIN_DECAY = 0.9996; // per getBarValues() call at ~60/s -> roughly a 45s time constant
+
   function getBarValues(barCount){
     const values = new Array(barCount);
     const bins = eqDataArray.length;
@@ -7415,6 +7610,8 @@ export function createThreeParticleBurst(){
     // permanent gap. Skip it and distribute the log scale across bins[1..capBin].
     const usableBins = Math.max(1, Math.min(bins - 1, Math.round((bins - 1) * freqCapRatio)));
     let prevEnd = 0;
+    let framePeakRatio = 0;
+    const peakRatios = getBarValues._scratch || (getBarValues._scratch = []);
     for(let i = 0; i < barCount; i++){
       // Logarithmic bin range per bar (like a real spectrum analyzer): narrow,
       // fine-grained ranges for the bass end, progressively wider ranges toward
@@ -7425,14 +7622,29 @@ export function createThreeParticleBurst(){
       end = Math.min(usableBins, Math.max(prevEnd + 1, end));
       let peak = 0;
       for(let j = prevEnd; j < end; j++){ if(eqDataArray[j + 1] > peak) peak = eqDataArray[j + 1]; }
-      const boost = 1 + (i / (barCount - 1 || 1)) * (EQ_HIGH_FREQ_BOOST - 1);
-      // sensitivity acts like an input-gain / reference-level knob, applied to
-      // the raw peak before the perceptual (gamma) compression below - lets
-      // quiet tracks be boosted so the EQ still visibly reacts to them.
-      const boostedPeak = Math.min(255, peak * eqStyle.sensitivity);
-      const norm = Math.pow(boostedPeak / 255, EQ_GAMMA);
-      values[i] = Math.min(1, norm * boost);
+      const peakRatio = peak / 255;
+      peakRatios[i] = peakRatio;
+      if(peakRatio > framePeakRatio) framePeakRatio = peakRatio;
       prevEnd = end;
+    }
+
+    eqAutoGainCeil = framePeakRatio > eqAutoGainCeil ? framePeakRatio : Math.max(EQ_AUTO_GAIN_FLOOR, eqAutoGainCeil * EQ_AUTO_GAIN_DECAY);
+    const autoGain = 1 / eqAutoGainCeil;
+    // Auto-gain scales the raw linear signal so the track's own recent loud
+    // peak maps to ~1.0, preserving quiet-vs-loud contrast within that
+    // track. Gamma (perceptual lift, now much gentler than before) and the
+    // per-bar high-frequency boost shape that into a display value. Finally
+    // `sensitivity` is applied as a plain linear multiplier on the finished
+    // 0..1 value - not mixed into the gamma/auto-gain math - so it always
+    // has a direct, predictable, visible effect (0.5x is always exactly
+    // half as tall, 2x always exactly double) regardless of how loud or
+    // quiet the source track is.
+    for(let i = 0; i < barCount; i++){
+      const boost = 1 + (i / (barCount - 1 || 1)) * (EQ_HIGH_FREQ_BOOST - 1);
+      const adjustedRatio = Math.max(0, Math.min(1, peakRatios[i] * autoGain));
+      const norm = Math.pow(adjustedRatio, EQ_GAMMA);
+      const displayVal = Math.min(1, norm * boost);
+      values[i] = Math.max(0, Math.min(1, displayVal * eqStyle.sensitivity));
     }
     return values;
   }
@@ -8544,6 +8756,9 @@ export function createThreeParticleBurst(){
   }
 
   /* ---------- EQ style customization ---------- */
+  function isThreeEqType(type){ return typeof type === 'string' && type.indexOf('three') === 0; }
+  function updateThreeEqControlsVisibility(type){ threeEqControls.classList.toggle('visible', isThreeEqType(type)); }
+
   function applyEqStyleToUI(style){
     eqStyleTypeSelect.value = style.type;
     eqColorStartInput.value = style.colorStart;
@@ -8557,6 +8772,13 @@ export function createThreeParticleBurst(){
     eqPosYSelect.value = style.posY;
     eqWidthInput.value = style.width;
     eqHeightInput.value = style.height;
+    threeRotationSpeedInput.value = style.threeRotationSpeed;
+    threeRotationAxisSelect.value = style.threeRotationAxis;
+    threeColorModeSelect.value = style.threeColorMode;
+    threeReactivityInput.value = style.threeReactivity;
+    threeContrastInput.value = style.threeContrast;
+    threeThicknessInput.value = style.threeThickness;
+    updateThreeEqControlsVisibility(style.type);
     markActiveColorPresetSwatch();
   }
 
@@ -8566,7 +8788,16 @@ export function createThreeParticleBurst(){
     if(analyserNode) analyserNode.smoothingTimeConstant = eqStyle.smoothing;
   }
 
-  eqStyleTypeSelect.addEventListener('change', function(){ eqStyle.type = eqStyleTypeSelect.value; });
+  eqStyleTypeSelect.addEventListener('change', function(){
+    eqStyle.type = eqStyleTypeSelect.value;
+    updateThreeEqControlsVisibility(eqStyle.type);
+  });
+  threeRotationSpeedInput.addEventListener('input', function(){ eqStyle.threeRotationSpeed = parseFloat(threeRotationSpeedInput.value); });
+  threeRotationAxisSelect.addEventListener('change', function(){ eqStyle.threeRotationAxis = threeRotationAxisSelect.value; });
+  threeColorModeSelect.addEventListener('change', function(){ eqStyle.threeColorMode = threeColorModeSelect.value; });
+  threeReactivityInput.addEventListener('input', function(){ eqStyle.threeReactivity = parseFloat(threeReactivityInput.value); });
+  threeContrastInput.addEventListener('input', function(){ eqStyle.threeContrast = parseFloat(threeContrastInput.value); });
+  threeThicknessInput.addEventListener('input', function(){ eqStyle.threeThickness = parseFloat(threeThicknessInput.value); });
   function markActiveColorPresetSwatch(){
     const swatches = eqColorPresetList.querySelectorAll('.eq-color-preset-swatch');
     let activeTitle = null;
@@ -9100,14 +9331,20 @@ export function createThreeParticleBurst(){
       colorStart: /^#[0-9a-fA-F]{6}$/.test(obj.colorStart) ? obj.colorStart : '#7fe9db',
       colorEnd: /^#[0-9a-fA-F]{6}$/.test(obj.colorEnd) ? obj.colorEnd : '#33d6c0',
       barCount: clamp(parseInt(obj.barCount, 10) || 40, 12, 64),
-      smoothing: clamp(isNaN(parseFloat(obj.smoothing)) ? 0.8 : parseFloat(obj.smoothing), 0, 0.95),
+      smoothing: clamp(isNaN(parseFloat(obj.smoothing)) ? 0.55 : parseFloat(obj.smoothing), 0, 0.95),
       glow: clamp(isNaN(parseFloat(obj.glow)) ? 0.4 : parseFloat(obj.glow), 0, 1),
       posX: ['left','center','right'].indexOf(obj.posX) !== -1 ? obj.posX : 'center',
       posY: ['top','center','bottom'].indexOf(obj.posY) !== -1 ? obj.posY : 'center',
       width: clamp(parseInt(obj.width, 10) || 100, 10, 100),
       height: clamp(parseInt(obj.height, 10) || 100, 10, 100),
-      sensitivity: clamp(isNaN(parseFloat(obj.sensitivity)) ? 1.5 : parseFloat(obj.sensitivity), 0.05, 3),
-      opacity: clamp(isNaN(parseFloat(obj.opacity)) ? 1 : parseFloat(obj.opacity), 0.1, 1)
+      sensitivity: clamp(isNaN(parseFloat(obj.sensitivity)) ? 1 : parseFloat(obj.sensitivity), 0.05, 3),
+      opacity: clamp(isNaN(parseFloat(obj.opacity)) ? 1 : parseFloat(obj.opacity), 0.1, 1),
+      threeRotationSpeed: clamp(isNaN(parseFloat(obj.threeRotationSpeed)) ? 1 : parseFloat(obj.threeRotationSpeed), -3, 3),
+      threeRotationAxis: ['y','x','z','free'].indexOf(obj.threeRotationAxis) !== -1 ? obj.threeRotationAxis : 'y',
+      threeColorMode: ['position','amplitude'].indexOf(obj.threeColorMode) !== -1 ? obj.threeColorMode : 'position',
+      threeReactivity: clamp(isNaN(parseFloat(obj.threeReactivity)) ? 1 : parseFloat(obj.threeReactivity), 0.2, 3),
+      threeContrast: clamp(isNaN(parseFloat(obj.threeContrast)) ? 1.6 : parseFloat(obj.threeContrast), 0.2, 2.5),
+      threeThickness: clamp(isNaN(parseFloat(obj.threeThickness)) ? 1 : parseFloat(obj.threeThickness), 0.3, 2.5)
     };
   }
 
@@ -9144,6 +9381,31 @@ export function createThreeParticleBurst(){
     };
   }
 
+  const PARAM_SECTION_IDS = ['paramSectionStyleIO', 'paramSectionFont', 'paramSectionBg', 'paramSectionEq', 'paramSectionExport'];
+  const paramSectionEls = {};
+  PARAM_SECTION_IDS.forEach(function(id){
+    const el = document.getElementById(id);
+    paramSectionEls[id] = el;
+    if(el) el.addEventListener('toggle', function(){ scheduleSaveSession(); });
+  });
+
+  function getPanelState(){
+    const state = {};
+    PARAM_SECTION_IDS.forEach(function(id){
+      const el = paramSectionEls[id];
+      if(el) state[id] = el.open;
+    });
+    return state;
+  }
+
+  function applyPanelState(state){
+    state = state || {};
+    PARAM_SECTION_IDS.forEach(function(id){
+      const el = paramSectionEls[id];
+      if(el) el.open = !!state[id];
+    });
+  }
+
   function getFullPreviewSettings(){
     let ratio = 'free';
     if(previewStage.classList.contains('ratio-vertical')) ratio = 'vertical';
@@ -9165,7 +9427,8 @@ export function createThreeParticleBurst(){
         visible: bgVisible
       },
       highlightMode: previewAll.classList.contains('highlight-text-only') ? 'text' : 'line',
-      eq: eqStyle
+      eq: eqStyle,
+      panelState: getPanelState()
     };
   }
 
@@ -9279,6 +9542,8 @@ export function createThreeParticleBurst(){
     applyBgTransform();
 
     setEqStyle(sanitizeEqStyle(obj.eq));
+
+    applyPanelState(obj.panelState);
   }
 
   previewStyleSaveBtn.addEventListener('click', function(){
