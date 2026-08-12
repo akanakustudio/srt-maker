@@ -9104,34 +9104,202 @@ export function createThreeParticleBurst(){
   // `expectedLength` pins the output to the same window count as the other
   // envelope arrays (computed independently, on a differently-sampled
   // buffer) so they line up index-for-index without a separate resampling step.
-  function computePitchConfidenceEnvelope(buffer, windowSec, expectedLength){
+  // YIN pitch tracker (de Cheveigné & Kawahara): the cumulative mean
+  // normalized difference function is more robust against octave errors
+  // than a plain autocorrelation peak, and - unlike a bare confidence score -
+  // it also yields an actual f0 value per window, which the vibrato
+  // detector below needs (checking for pitch *modulation* over time isn't
+  // possible from a confidence number alone). Runs on the vocal-band,
+  // downsampled buffer so it's both faster and already biased toward the
+  // vocal frequency range. `expectedLength` pins the output to the same
+  // window count as the other envelope arrays (computed independently, on a
+  // differently-sampled buffer) so everything lines up index-for-index.
+  function computeYinPitchTrack(buffer, windowSec, expectedLength){
     const sampleRate = buffer.sampleRate;
     const data = buffer.getChannelData(0);
     const hopSize = Math.max(1, Math.round(sampleRate * windowSec));
     const frameSize = Math.max(hopSize, Math.round(sampleRate * 0.045));
-    const minLag = Math.max(1, Math.round(sampleRate / 900));
-    const maxLag = Math.min(frameSize - 1, Math.round(sampleRate / 75));
-    const out = new Float32Array(expectedLength);
-    if(maxLag <= minLag) return out;
+    const minLag = Math.max(2, Math.round(sampleRate / 900));
+    const maxLag = Math.min(Math.floor(frameSize / 2), Math.round(sampleRate / 75));
+    const threshold = 0.15;
+    const freqs = new Float32Array(expectedLength);
+    const confidences = new Float32Array(expectedLength);
+    if(maxLag <= minLag) return { freqs: freqs, confidences: confidences };
+    const cmndf = new Float32Array(maxLag + 1);
     for(let w = 0; w < expectedLength; w++){
       const center = Math.min(data.length, w * hopSize + Math.floor(hopSize / 2));
       const start = Math.max(0, center - Math.floor(frameSize / 2));
       const end = Math.min(data.length, start + frameSize);
       const len = end - start;
       if(len < maxLag * 2){ continue; }
-      let energy = 0;
-      for(let i = start; i < end; i++){ energy += data[i] * data[i]; }
-      if(energy < 1e-8){ continue; }
-      let bestCorr = 0;
-      for(let lag = minLag; lag <= maxLag; lag++){
+
+      cmndf[0] = 1;
+      let runningSum = 0;
+      for(let lag = 1; lag <= maxLag; lag++){
+        let sum = 0;
         const validLen = len - lag;
-        if(validLen <= 0) break;
+        for(let i = 0; i < validLen; i++){
+          const d = data[start + i] - data[start + i + lag];
+          sum += d * d;
+        }
+        runningSum += sum;
+        cmndf[lag] = runningSum === 0 ? 1 : (sum * lag) / runningSum;
+      }
+
+      let tau = -1;
+      for(let lag = minLag; lag <= maxLag; lag++){
+        if(cmndf[lag] < threshold){
+          while(lag + 1 <= maxLag && cmndf[lag + 1] < cmndf[lag]) lag++;
+          tau = lag;
+          break;
+        }
+      }
+      if(tau === -1){
+        let minVal = Infinity, minLagIdx = minLag;
+        for(let lag = minLag; lag <= maxLag; lag++){
+          if(cmndf[lag] < minVal){ minVal = cmndf[lag]; minLagIdx = lag; }
+        }
+        tau = minLagIdx;
+      }
+
+      let betterTau = tau;
+      if(tau > minLag && tau < maxLag){
+        const s0 = cmndf[tau - 1], s1 = cmndf[tau], s2 = cmndf[tau + 1];
+        const denom = s0 + s2 - 2 * s1;
+        if(Math.abs(denom) > 1e-9) betterTau = tau + (s0 - s2) / (2 * denom);
+      }
+      freqs[w] = betterTau > 0 ? sampleRate / betterTau : 0;
+      confidences[w] = Math.max(0, Math.min(1, 1 - cmndf[tau]));
+    }
+    return { freqs: freqs, confidences: confidences };
+  }
+
+  // Sung notes waver in pitch at roughly 4-8Hz (natural vibrato); a clean
+  // instrument note - a guitar pluck being the specific case that was
+  // getting misread as a vocal entrance - holds a much steadier pitch
+  // unless deliberately bent. Measured as periodicity, restricted to the
+  // 4-8Hz range, of the f0 track's cents-deviation from its own local mean
+  // within a ~1s window around each frame. This reuses the YIN f0 track
+  // above rather than re-analyzing raw audio, so it's cheap.
+  function computeVibratoEnvelope(freqs, confidences, windowSec){
+    const n = freqs.length;
+    const out = new Float32Array(n);
+    const halfWin = Math.max(2, Math.round(0.5 / windowSec));
+    const minLag = Math.max(1, Math.round((1 / 8) / windowSec));
+    const maxLag = Math.max(minLag + 1, Math.round((1 / 4) / windowSec));
+    for(let i = 0; i < n; i++){
+      if(confidences[i] < 0.5 || freqs[i] <= 0){ continue; }
+      const lo = Math.max(0, i - halfWin), hi = Math.min(n - 1, i + halfWin);
+      const span = hi - lo + 1;
+      if(span < maxLag * 3) continue;
+      const cents = new Float32Array(span);
+      let sum = 0, cnt = 0;
+      for(let j = lo; j <= hi; j++){
+        if(confidences[j] > 0.4 && freqs[j] > 0){ sum += Math.log2(freqs[j]); cnt++; }
+      }
+      if(cnt < maxLag * 2) continue;
+      const meanLog = sum / cnt;
+      for(let j = lo; j <= hi; j++){
+        cents[j - lo] = (confidences[j] > 0.4 && freqs[j] > 0) ? (Math.log2(freqs[j]) - meanLog) * 1200 : 0;
+      }
+      let energy = 0;
+      for(let k = 0; k < span; k++){ energy += cents[k] * cents[k]; }
+      if(energy < 1e-6) continue;
+      let bestCorr = 0;
+      for(let lag = minLag; lag <= maxLag && lag < span; lag++){
         let corr = 0;
-        for(let i = 0; i < validLen; i++){ corr += data[start + i] * data[start + i + lag]; }
+        const validLen = span - lag;
+        for(let k = 0; k < validLen; k++){ corr += cents[k] * cents[k + lag]; }
         const norm = corr / energy;
         if(norm > bestCorr) bestCorr = norm;
       }
-      out[w] = Math.max(0, Math.min(1, bestCorr));
+      out[i] = Math.max(0, Math.min(1, bestCorr));
+    }
+    return out;
+  }
+
+  // "Formant bumpiness": fits an LPC all-pole model per window (standard
+  // autocorrelation method + Levinson-Durbin recursion) and scores how much
+  // resonance structure its spectral envelope has in the vowel-formant
+  // range (400-3800Hz). Sung vowels produce a handful of separated
+  // resonance peaks from the vocal tract's shape; a plucked/picked string's
+  // envelope, smoothed to the same LPC order, tends to decay more evenly
+  // without that same multi-peak structure. Order ~13 (sampleRate/1000 + 2)
+  // is the standard rule-of-thumb resolution for voice-band content at this
+  // sample rate.
+  function computeFormantBumpinessEnvelope(buffer, windowSec, expectedLength){
+    const sampleRate = buffer.sampleRate;
+    const data = buffer.getChannelData(0);
+    const hopSize = Math.max(1, Math.round(sampleRate * windowSec));
+    const frameSize = Math.max(hopSize, Math.round(sampleRate * 0.045));
+    const order = Math.max(8, Math.min(20, Math.round(sampleRate / 1000) + 2));
+    const out = new Float32Array(expectedLength);
+    const frame = new Float32Array(frameSize);
+    const autocorr = new Float32Array(order + 1);
+    const lpc = new Float32Array(order + 1);
+    const F_LO = 400, F_HI = Math.min(3800, sampleRate * 0.45);
+    const NUM_BINS = 24;
+    const mags = new Float32Array(NUM_BINS);
+
+    for(let w = 0; w < expectedLength; w++){
+      const center = Math.min(data.length, w * hopSize + Math.floor(hopSize / 2));
+      const start = Math.max(0, center - Math.floor(frameSize / 2));
+      const end = Math.min(data.length, start + frameSize);
+      const len = end - start;
+      if(len < order * 3) continue;
+
+      let mean = 0;
+      for(let i = 0; i < len; i++){ mean += data[start + i]; }
+      mean /= len;
+      for(let i = 0; i < len; i++){
+        const ham = 0.54 - 0.46 * Math.cos((2 * Math.PI * i) / (len - 1 || 1));
+        frame[i] = (data[start + i] - mean) * ham;
+      }
+
+      let r0 = 0;
+      for(let i = 0; i < len; i++){ r0 += frame[i] * frame[i]; }
+      if(r0 < 1e-9) continue;
+      autocorr[0] = r0;
+      for(let lag = 1; lag <= order; lag++){
+        let sum = 0;
+        for(let i = 0; i < len - lag; i++){ sum += frame[i] * frame[i + lag]; }
+        autocorr[lag] = sum;
+      }
+
+      let err = autocorr[0];
+      for(let i = 0; i <= order; i++) lpc[i] = 0;
+      let stable = true;
+      for(let i = 1; i <= order; i++){
+        let acc = autocorr[i];
+        for(let j = 1; j < i; j++){ acc -= lpc[j] * autocorr[i - j]; }
+        const k = err > 1e-9 ? acc / err : 0;
+        if(!isFinite(k)){ stable = false; break; }
+        const prev = lpc.slice(0, i);
+        lpc[i] = k;
+        for(let j = 1; j < i; j++){ lpc[j] = prev[j] - k * prev[i - j]; }
+        err *= (1 - k * k);
+        if(err <= 0){ stable = false; break; }
+      }
+      if(!stable) continue;
+
+      for(let b = 0; b < NUM_BINS; b++){
+        const freq = F_LO + (F_HI - F_LO) * (b / (NUM_BINS - 1));
+        const omega = (2 * Math.PI * freq) / sampleRate;
+        let reSum = 1, imSum = 0;
+        for(let k = 1; k <= order; k++){
+          reSum -= lpc[k] * Math.cos(omega * k);
+          imSum += lpc[k] * Math.sin(omega * k);
+        }
+        const denom = Math.max(1e-6, Math.sqrt(reSum * reSum + imSum * imSum));
+        mags[b] = 20 * Math.log10(1 / denom);
+      }
+      let meanDb = 0;
+      for(let b = 0; b < NUM_BINS; b++) meanDb += mags[b];
+      meanDb /= NUM_BINS;
+      let varDb = 0;
+      for(let b = 0; b < NUM_BINS; b++){ const d = mags[b] - meanDb; varDb += d * d; }
+      varDb /= NUM_BINS;
+      out[w] = Math.max(0, Math.min(1, Math.sqrt(varDb) / 18));
     }
     return out;
   }
@@ -9415,18 +9583,28 @@ export function createThreeParticleBurst(){
           const w = Math.min(1.3, Math.max(0.3, Math.pow(sustainWeight[i], 1.5)));
           baseEnvelope[i] = salienceEnvelope[i] * w;
         }
-        // Pitch/harmonicity confidence: a genuinely different signal from
-        // band-energy + sustain-shape above (a loud sustained chord can fool
-        // those; it rarely produces the single stable pitch a solo vocal
-        // line does), computed on a downsampled copy for speed.
+        // Pitch/harmonicity confidence, vibrato, and formant structure: three
+        // genuinely different signals from band-energy + sustain-shape above
+        // (a loud sustained chord, or a single clean plucked note, can still
+        // fool those). Pitch confidence alone doesn't separate a clean guitar
+        // note from a sung one - both hold a stable, trackable pitch - so
+        // vibrato (does that pitch waver at a singing-like 4-8Hz) and formant
+        // bumpiness (does the spectral envelope show vocal-tract-like
+        // resonance structure) are added specifically to catch that case.
+        // All computed on a downsampled copy for speed.
         return renderResampled(vocalBuffer, 11025).then(function(pitchBuffer){
-          const pitchConfidence = smoothEnvelope(
-            computePitchConfidenceEnvelope(pitchBuffer, windowSec, baseEnvelope.length), 3
+          const pitchTrack = computeYinPitchTrack(pitchBuffer, windowSec, baseEnvelope.length);
+          const pitchConfidence = smoothEnvelope(pitchTrack.confidences, 3);
+          const vibrato = computeVibratoEnvelope(pitchTrack.freqs, pitchTrack.confidences, windowSec);
+          const formantBumpiness = smoothEnvelope(
+            computeFormantBumpinessEnvelope(pitchBuffer, windowSec, baseEnvelope.length), 3
           );
           const envelope = new Float32Array(baseEnvelope.length);
           for(let i = 0; i < envelope.length; i++){
             const pitchW = 0.4 + Math.min(1, pitchConfidence[i]) * 1.1;
-            envelope[i] = baseEnvelope[i] * pitchW;
+            const vibratoW = 0.7 + Math.min(1, vibrato[i]) * 0.6;
+            const formantW = 0.7 + Math.min(1, formantBumpiness[i]) * 0.6;
+            envelope[i] = baseEnvelope[i] * pitchW * vibratoW * formantW;
           }
           const threshold = computeAdaptiveThreshold(envelope, windowSec, 3.5, 0.22);
           let segments = detectSegments(envelope, windowSec, threshold, 0.18, 0.05);
