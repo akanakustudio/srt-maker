@@ -9069,6 +9069,73 @@ export function createThreeParticleBurst(){
     });
   }
 
+  // Downsamples via OfflineAudioContext (it resamples automatically when the
+  // context's sampleRate differs from the source buffer's) so the pitch
+  // autocorrelation below - which is O(frameSize x lagRange) per window -
+  // runs on a much smaller buffer. Pitch content relevant to singing tops
+  // out under ~1kHz, so 11025Hz retains everything that matters while
+  // cutting the per-window cost roughly 16x versus running it at 44.1kHz.
+  function renderResampled(buffer, targetSampleRate){
+    const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if(!OfflineCtx || buffer.length === 0) return Promise.resolve(buffer);
+    return new Promise(function(resolve){
+      try {
+        const newLength = Math.max(1, Math.round(buffer.length * targetSampleRate / buffer.sampleRate));
+        const offlineCtx = new OfflineCtx(1, newLength, targetSampleRate);
+        const src = offlineCtx.createBufferSource();
+        src.buffer = buffer;
+        src.connect(offlineCtx.destination);
+        src.start(0);
+        offlineCtx.startRendering().then(resolve).catch(function(){ resolve(buffer); });
+      } catch(err){ resolve(buffer); }
+    });
+  }
+
+  // Per-window "how periodic is this sound" score via normalized
+  // autocorrelation, restricted to the lag range corresponding to typical
+  // singing pitch (~75-900Hz). Sung vowels hold a stable fundamental long
+  // enough to produce a strong, sharp autocorrelation peak; percussion,
+  // noise, and (usually) multi-note chordal instrument parts don't, so this
+  // is a genuinely different, complementary signal from the band-energy and
+  // sustain-shape heuristics above - a loud, sustained *chord* can still
+  // fool those, but rarely produces the single-pitch periodicity a solo
+  // vocal line does. Runs on the vocal-band, downsampled buffer so it's
+  // both faster and already biased toward the vocal frequency range.
+  // `expectedLength` pins the output to the same window count as the other
+  // envelope arrays (computed independently, on a differently-sampled
+  // buffer) so they line up index-for-index without a separate resampling step.
+  function computePitchConfidenceEnvelope(buffer, windowSec, expectedLength){
+    const sampleRate = buffer.sampleRate;
+    const data = buffer.getChannelData(0);
+    const hopSize = Math.max(1, Math.round(sampleRate * windowSec));
+    const frameSize = Math.max(hopSize, Math.round(sampleRate * 0.045));
+    const minLag = Math.max(1, Math.round(sampleRate / 900));
+    const maxLag = Math.min(frameSize - 1, Math.round(sampleRate / 75));
+    const out = new Float32Array(expectedLength);
+    if(maxLag <= minLag) return out;
+    for(let w = 0; w < expectedLength; w++){
+      const center = Math.min(data.length, w * hopSize + Math.floor(hopSize / 2));
+      const start = Math.max(0, center - Math.floor(frameSize / 2));
+      const end = Math.min(data.length, start + frameSize);
+      const len = end - start;
+      if(len < maxLag * 2){ continue; }
+      let energy = 0;
+      for(let i = start; i < end; i++){ energy += data[i] * data[i]; }
+      if(energy < 1e-8){ continue; }
+      let bestCorr = 0;
+      for(let lag = minLag; lag <= maxLag; lag++){
+        const validLen = len - lag;
+        if(validLen <= 0) break;
+        let corr = 0;
+        for(let i = 0; i < validLen; i++){ corr += data[start + i] * data[start + i + lag]; }
+        const norm = corr / energy;
+        if(norm > bestCorr) bestCorr = norm;
+      }
+      out[w] = Math.max(0, Math.min(1, bestCorr));
+    }
+    return out;
+  }
+
   function computeEnergyEnvelope(buffer, windowSec){
     const sampleRate = buffer.sampleRate;
     const data = buffer.getChannelData(0);
@@ -9196,12 +9263,19 @@ export function createThreeParticleBurst(){
       .map(function(seg){ return { start: seg[0] * windowSec, end: seg[1] * windowSec }; });
   }
 
-  function findLocalMinimumSplit(seg, envelope, windowSec){
+  function findLocalMinimumSplit(seg, envelope, windowSec, biasRatio){
     const startIdx = Math.round(seg.start / windowSec), endIdx = Math.round(seg.end / windowSec);
     if(endIdx - startIdx < 3) return (seg.start + seg.end) / 2;
-    const searchStart = startIdx + Math.floor((endIdx - startIdx) * 0.2);
-    const searchEnd = startIdx + Math.ceil((endIdx - startIdx) * 0.8);
-    let minVal = Infinity, minIdx = Math.round((startIdx + endIdx) / 2);
+    // Search a window centered on the text-length-proportional point instead
+    // of always the segment's midpoint, so e.g. a short line followed by a
+    // long line splits closer to 1/4 of the way through rather than exactly
+    // in half. Falls back to a plain centered search when no bias is given.
+    const b = (typeof biasRatio === 'number' && isFinite(biasRatio)) ? Math.min(0.8, Math.max(0.2, biasRatio)) : 0.5;
+    const span = endIdx - startIdx;
+    const centerIdx = startIdx + span * b;
+    const searchStart = Math.max(startIdx, Math.round(centerIdx - span * 0.3));
+    const searchEnd = Math.min(endIdx, Math.round(centerIdx + span * 0.3));
+    let minVal = Infinity, minIdx = Math.round(centerIdx);
     for(let i = searchStart; i <= searchEnd; i++){
       if(envelope[i] < minVal){ minVal = envelope[i]; minIdx = i; }
     }
@@ -9216,19 +9290,54 @@ export function createThreeParticleBurst(){
     return peak;
   }
 
-  function adjustSegmentCount(segments, targetCount, envelope, windowSec){
+  // Estimates which target-line index range a segment currently occupying
+  // position `idx` of `currentCount` segments is likely to end up
+  // representing once the count reaches `targetCount` - segments and lines
+  // are both always in temporal/reading order and splits/merges preserve
+  // that order, so a segment's *position* in the current array is a
+  // reasonable proxy for its eventual line range even mid-reconciliation,
+  // without needing a full acoustic-to-text alignment pass.
+  function estimateLineRangeForSegment(idx, currentCount, targetCount){
+    const lineStart = Math.round((idx / currentCount) * targetCount);
+    const lineEnd = Math.max(lineStart, Math.round(((idx + 1) / currentCount) * targetCount) - 1);
+    return { lineStart: lineStart, lineEnd: lineEnd };
+  }
+
+  // `expectedTextLengths[i]` is a rough proxy (character count) for how long
+  // target line i probably takes to sing, used as a *weak* prior alongside
+  // the acoustic signal - not a replacement for it - to make merge/split
+  // decisions land on the right line more often instead of purely on
+  // acoustic strength or segment duration in isolation.
+  function adjustSegmentCount(segments, targetCount, envelope, windowSec, expectedTextLengths){
     segments = segments.map(function(s){ return { start: s.start, end: s.end }; });
+    const totalTextLen = (expectedTextLengths && expectedTextLengths.length)
+      ? expectedTextLengths.reduce(function(a, b){ return a + b; }, 0) : 0;
+
     // When there are more detected segments than lines, drop the weakest one
-    // (lowest peak in the vocal/sustain-weighted envelope) by folding it into
-    // its nearer neighbor, rather than always merging whichever pair happens
-    // to sit closest together in time. A stray short false-positive (e.g. a
-    // single guitar pluck) is usually much weaker than real vocal segments,
-    // so this lets it get absorbed instead of displacing real line timing.
+    // by folding it into its nearer neighbor, rather than always merging
+    // whichever pair happens to sit closest together in time. A stray short
+    // false-positive (e.g. a single guitar pluck) is usually much weaker
+    // than real vocal segments, so this lets it get absorbed instead of
+    // displacing real line timing. When text lengths are available, a
+    // segment that's also much shorter than its estimated line's text would
+    // predict is weighted as an even more likely merge candidate - a real
+    // but truncated detection of a long line, not a separate short line.
     while(segments.length > targetCount && segments.length > 1){
-      let weakestIdx = 0, weakestStrength = Infinity;
+      let weakestIdx = 0, weakestScore = Infinity;
+      const totalSpan = (segments[segments.length - 1].end - segments[0].start) || 1;
       for(let i = 0; i < segments.length; i++){
         const strength = segmentPeakStrength(segments[i], envelope, windowSec);
-        if(strength < weakestStrength){ weakestStrength = strength; weakestIdx = i; }
+        let score = strength;
+        if(totalTextLen > 0){
+          const range = estimateLineRangeForSegment(i, segments.length, targetCount);
+          let expectedLen = 0;
+          for(let li = range.lineStart; li <= range.lineEnd; li++){ expectedLen += expectedTextLengths[li] || 0; }
+          const expectedRelDur = expectedLen / totalTextLen;
+          const actualRelDur = (segments[i].end - segments[i].start) / totalSpan;
+          const durationFit = Math.min(1, actualRelDur / Math.max(0.08, expectedRelDur));
+          score = strength * durationFit;
+        }
+        if(score < weakestScore){ weakestScore = score; weakestIdx = i; }
       }
       if(weakestIdx === 0){
         segments[1].start = segments[0].start;
@@ -9255,7 +9364,18 @@ export function createThreeParticleBurst(){
         if(len > maxLen){ maxLen = len; maxIdx = i; }
       });
       const seg = segments[maxIdx];
-      const splitPoint = findLocalMinimumSplit(seg, envelope, windowSec);
+      let biasRatio = 0.5;
+      if(totalTextLen > 0){
+        const range = estimateLineRangeForSegment(maxIdx, segments.length, targetCount);
+        if(range.lineEnd > range.lineStart){
+          const mid = range.lineStart + Math.floor((range.lineEnd - range.lineStart) / 2);
+          let firstLen = 0, secondLen = 0;
+          for(let li = range.lineStart; li <= mid; li++){ firstLen += expectedTextLengths[li] || 1; }
+          for(let li = mid + 1; li <= range.lineEnd; li++){ secondLen += expectedTextLengths[li] || 1; }
+          if(firstLen + secondLen > 0) biasRatio = firstLen / (firstLen + secondLen);
+        }
+      }
+      const splitPoint = findLocalMinimumSplit(seg, envelope, windowSec, biasRatio);
       segments.splice(maxIdx, 1, { start: seg.start, end: splitPoint }, { start: splitPoint, end: seg.end });
     }
     return segments;
@@ -9290,30 +9410,52 @@ export function createThreeParticleBurst(){
         const vocalEnvelopeRaw = smoothEnvelope(computeEnergyEnvelope(vocalBuffer, windowSec), 3);
         const salienceEnvelope = computeVocalSalienceEnvelope(vocalEnvelopeRaw, fullEnvelope);
         const sustainWeight = computeSustainWeight(vocalEnvelopeRaw, windowSec);
-        const envelope = new Float32Array(salienceEnvelope.length);
-        for(let i = 0; i < envelope.length; i++){
+        const baseEnvelope = new Float32Array(salienceEnvelope.length);
+        for(let i = 0; i < baseEnvelope.length; i++){
           const w = Math.min(1.3, Math.max(0.3, Math.pow(sustainWeight[i], 1.5)));
-          envelope[i] = salienceEnvelope[i] * w;
+          baseEnvelope[i] = salienceEnvelope[i] * w;
         }
-        const threshold = computeAdaptiveThreshold(envelope, windowSec, 3.5, 0.22);
-        let segments = detectSegments(envelope, windowSec, threshold, 0.18, 0.05);
-        if(segments.length === 0){
-          setStatus('有音区間を検出できませんでした。音源をご確認ください。', 'err');
-          return;
-        }
-        segments = adjustSegmentCount(segments, timeableIndices.length, envelope, windowSec);
-        segments.sort(function(a, b){ return a.start - b.start; });
+        // Pitch/harmonicity confidence: a genuinely different signal from
+        // band-energy + sustain-shape above (a loud sustained chord can fool
+        // those; it rarely produces the single stable pitch a solo vocal
+        // line does), computed on a downsampled copy for speed.
+        return renderResampled(vocalBuffer, 11025).then(function(pitchBuffer){
+          const pitchConfidence = smoothEnvelope(
+            computePitchConfidenceEnvelope(pitchBuffer, windowSec, baseEnvelope.length), 3
+          );
+          const envelope = new Float32Array(baseEnvelope.length);
+          for(let i = 0; i < envelope.length; i++){
+            const pitchW = 0.4 + Math.min(1, pitchConfidence[i]) * 1.1;
+            envelope[i] = baseEnvelope[i] * pitchW;
+          }
+          const threshold = computeAdaptiveThreshold(envelope, windowSec, 3.5, 0.22);
+          let segments = detectSegments(envelope, windowSec, threshold, 0.18, 0.05);
+          if(segments.length === 0){
+            setStatus('有音区間を検出できませんでした。音源をご確認ください。', 'err');
+            return;
+          }
+          // Character count per target line as a weak duration prior, so
+          // merge/split decisions in ties (or near-ties) land on the line
+          // that's actually more plausible given the text, not just
+          // whichever segment happens to be acoustically weakest/longest.
+          const expectedTextLengths = timeableIndices.map(function(idx){
+            const len = stripMetaTags(lyricsLines[idx].text || '').trim().length;
+            return len > 0 ? len : 1;
+          });
+          segments = adjustSegmentCount(segments, timeableIndices.length, envelope, windowSec, expectedTextLengths);
+          segments.sort(function(a, b){ return a.start - b.start; });
 
-        timeableIndices.forEach(function(lineIdx, i){
-          const seg = segments[i];
-          if(!seg) return;
-          lyricsLines[lineIdx].start = seg.start;
-          lyricsLines[lineIdx].end = seg.end;
+          timeableIndices.forEach(function(lineIdx, i){
+            const seg = segments[i];
+            if(!seg) return;
+            lyricsLines[lineIdx].start = seg.start;
+            lyricsLines[lineIdx].end = seg.end;
+          });
+          currentIndex = firstTimeableIndex(0);
+          renderTable();
+          scheduleSaveSession();
+          setStatus(timeableIndices.length + '行に自動でタイミングを設定しました。ズレがあれば個別に微調整してください。', 'ok');
         });
-        currentIndex = firstTimeableIndex(0);
-        renderTable();
-        scheduleSaveSession();
-        setStatus(timeableIndices.length + '行に自動でタイミングを設定しました。ズレがあれば個別に微調整してください。', 'ok');
       })
       .catch(function(err){
         setStatus('自動タイミング設定に失敗しました: ' + err.message, 'err');
