@@ -1104,6 +1104,7 @@
                 <option value="threespiketower">3Dスパイクタワー</option>
                 <option value="threeglitchcube">3Dグリッチキューブ</option>
                 <option value="threeparticleburst">3Dパーティクルバースト</option>
+                <option value="threekaleidoscope">3Dカレイドスコープ</option>
               </optgroup>
               <optgroup label="その他">
                 <option value="dots">ドット</option>
@@ -6997,6 +6998,186 @@ export function createThreeParticleBurst(){
 
   return { canvas: canvas, update: update, dispose: dispose };
 }
+
+// Three.js-powered "kaleidoscope mandala" EQ: eight radially mirrored
+// petals of small gem meshes spiraling outward from a pulsing central core,
+// each petal sharing the exact same frequency-bin mapping so the whole
+// shape reads as a true mirrored mandala rather than an unrelated per-arm
+// pattern - the bet being that symmetry itself, not just motion or
+// brightness, is what makes a visualizer pleasant to watch for a long
+// stretch of an upbeat track. The petal group spins slowly in-plane (the
+// classic kaleidoscope motion) while a fast-attack/slow-decay punch
+// envelope blooms the whole mandala outward and flashes the core on beats.
+// Exposed the same way as the other Three.js EQ styles: an (values,
+// eqStyle, w, h) update() call driving an offscreen canvas composited in
+// via ctx.drawImage().
+export function createThreeKaleidoscope(){
+  const FOLDS = 8;
+  const PER_PETAL = 14;
+  const GEM_COUNT = FOLDS * PER_PETAL;
+  const RADIUS_STEP = 0.32;
+  const SPIRAL_TWIST = 0.14; // extra angle per gem stepping outward - curves each petal into a pinwheel instead of a straight spoke
+  const MIN_S = 0.09, MAX_S = 0.34;
+  const BASE_FOV = 42;
+
+  const canvas = document.createElement('canvas');
+  const renderer = new THREE.WebGLRenderer({
+    canvas: canvas, alpha: true, antialias: true
+  });
+  renderer.setPixelRatio(1);
+  renderer.setClearColor(0x000000, 0);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, 100);
+
+  // No scene lights - same reasoning as every other 3D EQ style in this
+  // file: unlit MeshBasicMaterial with directly-set colors is the only
+  // approach proven to render the color pattern correctly across GPUs (see
+  // createThreeGridBox()'s history for the full story).
+  const group = new THREE.Group();
+  scene.add(group);
+
+  // Faint static concentric guide rings, purely decorative (same idea as
+  // createThreeGridBox()'s static reference grid) - gives the mandala a
+  // subtle "etched into glass" backdrop instead of floating on pure black.
+  const ringGeos = [], ringMats = [];
+  for(let r = 1; r <= 3; r++){
+    const pts = [];
+    const radius = r * PER_PETAL * RADIUS_STEP * 0.36;
+    for(let i = 0; i <= 64; i++){
+      const a = (i / 64) * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.cos(a) * radius, Math.sin(a) * radius, 0));
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineBasicMaterial({ color: 0x2c4a52, transparent: true, opacity: 0.35 });
+    ringGeos.push(geo); ringMats.push(mat);
+    group.add(new THREE.LineSegments(geo, mat));
+  }
+
+  // Individual Mesh + MeshBasicMaterial per gem, not InstancedMesh +
+  // setColorAt() - same fix as createThreeGridBox().
+  const gemGeo = new THREE.OctahedronGeometry(0.5, 0);
+  const gemMeshes = new Array(GEM_COUNT);
+  for(let i = 0; i < GEM_COUNT; i++){
+    const m = new THREE.Mesh(gemGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    group.add(m);
+    gemMeshes[i] = m;
+  }
+
+  const coreGeo = new THREE.OctahedronGeometry(0.4, 1);
+  const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+  const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+  group.add(coreMesh);
+
+  const smoothedAmp = new Float32Array(GEM_COUNT);
+  let lastW = 0, lastH = 0;
+  let lastColorStart = null, lastColorEnd = null;
+  const startTime = performance.now();
+  let lastElapsed = 0;
+  let spinAngle = 0;
+  let punch = 0;
+  const tmpColorA = new THREE.Color();
+  const tmpColorB = new THREE.Color();
+  const cellColor = new THREE.Color();
+  const WHITE = new THREE.Color(0xffffff);
+
+  function applyColors(colorStartHex, colorEndHex){
+    lastColorStart = colorStartHex; lastColorEnd = colorEndHex;
+    tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
+  }
+
+  function update(values, eqStyle, w, h){
+    if(w !== lastW || h !== lastH){
+      lastW = w; lastH = h;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / Math.max(1, h);
+      camera.updateProjectionMatrix();
+    }
+    if(eqStyle.colorStart !== lastColorStart || eqStyle.colorEnd !== lastColorEnd){
+      applyColors(eqStyle.colorStart, eqStyle.colorEnd);
+    }
+
+    const n = values.length;
+    let sum = 0, peak = 0;
+    for(let i = 0; i < n; i++){ sum += values[i]; if(values[i] > peak) peak = values[i]; }
+    const level = n ? sum / n : 0;
+    // Fast-attack/slow-decay beat envelope - blooms the whole mandala
+    // outward and flashes the core on a hit, then eases back.
+    punch = Math.max(peak, punch * 0.8);
+
+    const elapsed = (performance.now() - startTime) / 1000;
+    const dt = Math.max(0, Math.min(0.1, elapsed - lastElapsed));
+    lastElapsed = elapsed;
+    const reactivity = eqStyle.threeReactivity || 1;
+    const contrast = eqStyle.threeContrast || 1;
+    const thickness = eqStyle.threeThickness || 1;
+    const colorByAmplitude = eqStyle.threeColorMode === 'amplitude';
+
+    for(let petal = 0; petal < FOLDS; petal++){
+      const baseAngle = (petal / FOLDS) * Math.PI * 2;
+      for(let i = 0; i < PER_PETAL; i++){
+        const idx = petal * PER_PETAL + i;
+        // Every petal reads the exact same bin sequence - true mirrored
+        // symmetry, not an unrelated pattern per arm.
+        const barIdx = Math.min(n - 1, Math.floor((i / PER_PETAL) * n));
+        const v = n ? values[barIdx] : 0;
+        smoothedAmp[idx] += (v - smoothedAmp[idx]) * 0.4;
+        const amp = smoothedAmp[idx];
+
+        const radius = (i + 1.6) * RADIUS_STEP * (1 + amp * reactivity * 0.55);
+        const angle = baseAngle + i * SPIRAL_TWIST;
+        const m = gemMeshes[idx];
+        m.position.set(Math.cos(angle) * radius, Math.sin(angle) * radius, 0);
+        m.rotation.set(elapsed * 0.5 + idx * 0.3, elapsed * 0.3, 0);
+        m.scale.setScalar((MIN_S + amp * reactivity * MAX_S) * thickness);
+
+        const t = colorByAmplitude ? amp : (i / (PER_PETAL - 1 || 1));
+        cellColor.copy(tmpColorA).lerp(tmpColorB, t);
+        cellColor.lerp(WHITE, Math.min(0.65, amp * 0.6 + punch * 0.3) / contrast);
+        m.material.color.copy(cellColor);
+      }
+    }
+
+    // Core: pulses brighter/bigger with overall loudness and punch - the
+    // mandala's visual "heartbeat", tying the whole pattern together.
+    coreMesh.scale.setScalar(1 + level * 0.3 + punch * 0.7);
+    coreMat.color.copy(tmpColorA).lerp(WHITE, Math.min(1, 0.4 + punch * 0.8));
+    coreMat.opacity = Math.min(1, 0.6 + punch * 0.4);
+
+    // Whole-mandala bloom on a hit, on top of each gem's own reactivity.
+    group.scale.setScalar(1 + punch * 0.12);
+
+    // Classic in-plane kaleidoscope spin - the core identity of this style,
+    // so it always spins regardless of the rotation-axis control below.
+    const rotSpeed = eqStyle.threeRotationSpeed || 1;
+    spinAngle += dt * 0.25 * rotSpeed;
+    group.rotation.z = spinAngle;
+
+    // The existing rotation-axis control becomes a gentle camera depth
+    // wobble instead of orbiting all the way around - orbiting a flat
+    // mandala out of frontal view would defeat the point of the symmetry.
+    const off = threeOrbitOffset(eqStyle.threeRotationAxis, elapsed * 0.3, 1);
+    camera.position.set(off.x * 1.2, off.y * 1.2, 11 - punch * 0.6);
+    camera.fov = BASE_FOV - punch * 5;
+    camera.updateProjectionMatrix();
+    camera.lookAt(0, 0, 0);
+
+    renderer.render(scene, camera);
+  }
+
+  function dispose(){
+    gemGeo.dispose();
+    gemMeshes.forEach(function(m){ m.material.dispose(); });
+    coreGeo.dispose();
+    coreMat.dispose();
+    ringGeos.forEach(function(g){ g.dispose(); });
+    ringMats.forEach(function(m){ m.dispose(); });
+    renderer.dispose();
+  }
+
+  return { canvas: canvas, update: update, dispose: dispose };
+}
 </script>
 <script>
 (function(){
@@ -8023,7 +8204,7 @@ export function createThreeParticleBurst(){
   let eqEnabled = false;
   let eqRAF = null;
 
-  const EQ_TYPES = ['bars', 'mirror', 'wave', 'circular', 'dots', 'led', 'radialDots', 'polygon', 'rays', 'ripple', 'particles', 'orb', 'smoothline', 'auraring', 'neongrid', 'liquidblob', 'vumeter', 'ringpulse', 'petalring', 'glitchblocks', 'plexus', 'ribbonwave', 'flowglow', 'flamebars', 'gradientwave', 'tunnel3d', 'rainbowcorona', 'three3d', 'threewave', 'threespike', 'threegridbox', 'threespiketower', 'threeglitchcube', 'threeparticleburst', 'oscilloscope'];
+  const EQ_TYPES = ['bars', 'mirror', 'wave', 'circular', 'dots', 'led', 'radialDots', 'polygon', 'rays', 'ripple', 'particles', 'orb', 'smoothline', 'auraring', 'neongrid', 'liquidblob', 'vumeter', 'ringpulse', 'petalring', 'glitchblocks', 'plexus', 'ribbonwave', 'flowglow', 'flamebars', 'gradientwave', 'tunnel3d', 'rainbowcorona', 'three3d', 'threewave', 'threespike', 'threegridbox', 'threespiketower', 'threeglitchcube', 'threeparticleburst', 'threekaleidoscope', 'oscilloscope'];
   let eqStyle = {
     type: 'bars',
     colorStart: '#7fe9db',
@@ -9068,6 +9249,7 @@ export function createThreeParticleBurst(){
   let threeSpikeTowerInstance = null;
   let threeGlitchCubeInstance = null;
   let threeParticleBurstInstance = null;
+  let threeKaleidoscopeInstance = null;
   let threeEqLoadFailed = false;
 
   function loadThreeEqModule(){
@@ -9091,6 +9273,7 @@ export function createThreeParticleBurst(){
       threeSpikeTowerInstance = mod.createThreeSpikeTower();
       threeGlitchCubeInstance = mod.createThreeGlitchCube();
       threeParticleBurstInstance = mod.createThreeParticleBurst();
+      threeKaleidoscopeInstance = mod.createThreeKaleidoscope();
     }).catch(function(err){
       threeEqLoadFailed = true;
       console.warn('[srt-maker] Three.js EQの初期化に失敗しました', err);
@@ -9164,6 +9347,15 @@ export function createThreeParticleBurst(){
     ctx.drawImage(threeParticleBurstInstance.canvas, 0, 0, w, h);
   }
 
+  function drawEqThreeKaleidoscope(ctx, w, h){
+    ensureThreeEqLoading();
+    if(!threeKaleidoscopeInstance) return; // still loading (or failed) - skip this frame
+    const values = getBarValues(eqStyle.barCount);
+    const dw = Math.max(2, Math.round(w)), dh = Math.max(2, Math.round(h));
+    threeKaleidoscopeInstance.update(values, eqStyle, dw, dh);
+    ctx.drawImage(threeKaleidoscopeInstance.canvas, 0, 0, w, h);
+  }
+
   function drawEqOscilloscope(ctx, w, h){
     const data = eqTimeDataArray;
     const len = data.length;
@@ -9235,6 +9427,7 @@ export function createThreeParticleBurst(){
         case 'threespiketower': drawEqThreeSpikeTower(ctx, rect.w, rect.h); break;
         case 'threeglitchcube': drawEqThreeGlitchCube(ctx, rect.w, rect.h); break;
         case 'threeparticleburst': drawEqThreeParticleBurst(ctx, rect.w, rect.h); break;
+        case 'threekaleidoscope': drawEqThreeKaleidoscope(ctx, rect.w, rect.h); break;
         default: drawEqBars(ctx, rect.w, rect.h);
       }
     }
@@ -10797,6 +10990,7 @@ export function createThreeParticleBurst(){
           case 'threespiketower': drawEqThreeSpikeTower(recordCtx, rect.w, rect.h); break;
           case 'threeglitchcube': drawEqThreeGlitchCube(recordCtx, rect.w, rect.h); break;
           case 'threeparticleburst': drawEqThreeParticleBurst(recordCtx, rect.w, rect.h); break;
+          case 'threekaleidoscope': drawEqThreeKaleidoscope(recordCtx, rect.w, rect.h); break;
           default: drawEqBars(recordCtx, rect.w, rect.h);
         }
       }
