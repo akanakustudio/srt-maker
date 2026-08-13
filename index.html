@@ -300,12 +300,17 @@
   .wave-viewport{position:relative;overflow:hidden;}
   .wave-scroll-area{
     position:relative;overflow-x:auto;overflow-y:hidden;
-    height:84px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);
+    height:114px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);
     cursor:grab;touch-action:none;
   }
   .wave-scroll-area:active{cursor:grabbing;}
-  .wave-scroll-inner{position:relative;height:40px;min-width:100%;}
-  .wave-track-row{position:absolute;inset:0;}
+  /* Two stacked rows share this one inner element/time axis: the background
+     asset track (B-1) on top, the lyric-line track (C-1) below. Keeping them
+     in the same scroll container means zoom/scroll/playhead stay in sync
+     structurally, with no separate state to keep in lockstep by hand. */
+  .wave-scroll-inner{position:relative;height:70px;min-width:100%;}
+  .bg-asset-track-row{position:absolute;top:0;left:0;right:0;height:28px;}
+  .wave-track-row{position:absolute;top:30px;left:0;right:0;height:40px;}
   .wave-block{
     position:absolute;top:2px;height:36px;border-radius:4px;
     background:rgba(51,214,192,.18);border:1px solid var(--accent-dim);
@@ -323,7 +328,24 @@
   .wave-handle.start{left:-4px;}
   .wave-handle.end{right:-4px;}
   .wave-handle:hover{background:rgba(51,214,192,.4);}
-  .wave-canvas{position:absolute;top:44px;left:0;height:36px;pointer-events:none;}
+  /* Background-asset blocks (B-1) use an amber accent to stay visually
+     distinct from the teal lyric-line blocks directly below them. */
+  .bg-asset-block{
+    position:absolute;top:2px;height:24px;border-radius:4px;
+    background:rgba(255,176,32,.2);border:1px solid #cf8b1f;
+    overflow:hidden;font-size:10px;color:var(--text);white-space:nowrap;
+    padding:2px 5px;line-height:1.3;cursor:grab;touch-action:none;
+  }
+  .bg-asset-block:active{cursor:grabbing;}
+  .bg-asset-block.current{background:rgba(255,176,32,.38);border-color:#ffb020;}
+  .bg-asset-block.open-ended{border-right-style:dashed;}
+  .bg-asset-handle{
+    position:absolute;top:0;bottom:0;width:9px;cursor:ew-resize;touch-action:none;z-index:2;
+  }
+  .bg-asset-handle.start{left:-4px;}
+  .bg-asset-handle.end{right:-4px;}
+  .bg-asset-handle:hover{background:rgba(255,176,32,.4);}
+  .wave-canvas{position:absolute;top:74px;left:0;height:36px;pointer-events:none;}
   .wave-playhead{
     position:absolute;top:0;bottom:0;width:1px;background:var(--danger);
     pointer-events:none;z-index:3;transform:translateX(-9999px);
@@ -503,8 +525,32 @@
   .preview-control input[type=number]:focus{outline:none;border-color:var(--accent-dim);}
 
   .bg-controls{
-    display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px;
+    display:flex;flex-direction:column;gap:8px;padding:10px 16px;
   }
+  .bg-asset-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  .bg-asset-empty-hint{font-size:11.5px;color:var(--muted2);line-height:1.6;padding:2px 1px;}
+  .bg-asset-empty-hint.hidden{display:none;}
+  .bg-asset-list{display:flex;flex-direction:column;gap:6px;width:100%;}
+  .bg-asset-row{border:1px solid var(--line);border-radius:8px;background:var(--panel2);overflow:hidden;}
+  .bg-asset-row-head{display:flex;align-items:center;gap:8px;padding:7px 9px;font-size:11.5px;flex-wrap:wrap;}
+  .bg-asset-kind-badge{
+    flex:none;font-size:10px;padding:2px 6px;border-radius:10px;
+    background:rgba(255,176,32,.18);color:#ffb020;border:1px solid #cf8b1f;
+  }
+  .bg-asset-name{flex:1;min-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);}
+  .bg-asset-range{flex:none;color:var(--muted2);font-family:var(--mono);font-size:10.5px;}
+  .bg-asset-warn{flex:none;color:var(--danger);font-size:10px;}
+  .bg-asset-row-actions{flex:none;display:flex;gap:4px;margin-left:auto;}
+  .bg-asset-row-actions button{
+    background:none;border:1px solid var(--line);color:var(--muted);border-radius:6px;
+    padding:3px 7px;font-size:11px;cursor:pointer;
+  }
+  .bg-asset-row-actions button:hover{border-color:var(--accent-dim);color:var(--text);}
+  .bg-asset-row-body{
+    display:none;flex-wrap:wrap;gap:10px 14px;align-items:center;
+    padding:8px 9px 9px;border-top:1px dashed var(--line);
+  }
+  .bg-asset-row.expanded .bg-asset-row-body{display:flex;}
 
   .font-style-controls{
     display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px;
@@ -866,7 +912,7 @@
           <button class="toggle-btn" type="button" id="previewStyleSaveBtn">プレビュー設定を保存</button>
           <label class="toggle-btn" for="previewStyleLoadInput">プレビュー設定を読み込み</label>
           <input type="file" id="previewStyleLoadInput" accept=".json,application/json" style="display:none">
-          <span class="hint">フォント・背景・グラフィックイコライザーなど、歌詞プレビューの設定一式を保存/読み込みします（背景の画像・動画そのものは含みません）</span>
+          <span class="hint">フォント・グラフィックイコライザーなど、歌詞プレビューの設定一式を保存/読み込みします（背景素材とその設定はプロジェクトファイル側で管理されるため含みません）</span>
         </div>
       </details>
       <details class="param-section" id="paramSectionFont">
@@ -995,46 +1041,14 @@
       <details class="param-section" id="paramSectionBg">
         <summary class="param-section-head"><span>背景（画像/動画）</span><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg></summary>
         <div class="bg-controls" id="bgControls">
-          <label class="toggle-btn" for="previewBgInput">背景を設定（画像/動画）</label>
-          <input type="file" id="previewBgInput" accept="image/*,video/*" style="display:none">
-          <button class="toggle-btn" type="button" id="previewBgClearBtn" disabled>背景をクリア</button>
-          <button class="toggle-btn active" type="button" id="previewBgVisibleToggle" disabled>背景を表示</button>
-          <label class="preview-control">
-            <span>背景の透過度</span>
-            <input type="range" id="bgOpacity" min="0" max="1" step="0.05" value="1">
-          </label>
-          <label class="preview-control">
-            <span>背景サイズ</span>
-            <select id="bgSizeMode">
-              <option value="contain" selected>フィット（全体表示）</option>
-              <option value="cover">画面を覆う（トリミング）</option>
-              <option value="auto">原寸大</option>
-              <option value="zoom">ズーム（カスタム）</option>
-            </select>
-          </label>
-          <label class="preview-control">
-            <span>ズーム</span>
-            <input type="range" id="bgZoom" min="20" max="300" step="5" value="100">
-          </label>
-          <label class="preview-control">
-            <span>横位置</span>
-            <input type="range" id="bgPosX" min="0" max="100" step="1" value="50">
-          </label>
-          <label class="preview-control">
-            <span>縦位置</span>
-            <input type="range" id="bgPosY" min="0" max="100" step="1" value="50">
-          </label>
-          <label class="preview-control" id="bgVideoLoopEffectRow" title="背景動画がループする瞬間の唐突なカットを緩和します（動画背景の時のみ）">
-            <span>動画ループ時エフェクト</span>
-            <select id="bgLoopEffect">
-              <option value="none" selected>なし</option>
-              <option value="fade">フェード</option>
-            </select>
-          </label>
-          <label class="preview-control" id="bgVideoLoopFadeRow" title="背景動画がループする瞬間の唐突なカットを緩和します（動画背景の時のみ）">
-            <span>ループフェード時間(秒)</span>
-            <input type="range" id="bgLoopFadeDuration" min="0.1" max="2" step="0.1" value="0.5">
-          </label>
+          <div class="bg-asset-toolbar">
+            <label class="toggle-btn" for="previewBgInput">＋背景素材を追加（複数選択可）</label>
+            <input type="file" id="previewBgInput" accept="image/*,video/*" multiple style="display:none">
+            <button class="toggle-btn active" type="button" id="previewBgVisibleToggle" disabled>背景を表示</button>
+            <button class="toggle-btn" type="button" id="previewBgClearBtn" disabled>すべての背景素材をクリア</button>
+          </div>
+          <div class="bg-asset-empty-hint" id="bgAssetEmptyHint">背景素材（画像/動画）を追加すると、ここに一覧が表示されます。曲のタイムライン上（下部の波形ビュー）でも配置を調整できます。</div>
+          <div class="bg-asset-list" id="bgAssetList"></div>
         </div>
       </details>
       <details class="param-section" id="paramSectionEq">
@@ -1385,6 +1399,7 @@
         <div class="wave-viewport" id="waveViewport">
           <div class="wave-scroll-area" id="waveScrollArea">
             <div class="wave-scroll-inner" id="waveScrollInner">
+              <div class="bg-asset-track-row" id="bgAssetTrackRow"></div>
               <div class="wave-track-row" id="waveTrackRow"></div>
             </div>
           </div>
@@ -7153,14 +7168,10 @@ export function createThreeParticleBurst(){
   const previewBgInput = document.getElementById('previewBgInput');
   const previewBgClearBtn = document.getElementById('previewBgClearBtn');
   const previewBgVisibleToggle = document.getElementById('previewBgVisibleToggle');
-  const bgOpacityInput = document.getElementById('bgOpacity');
   const previewBgVideo = document.getElementById('previewBgVideo');
-  const bgSizeModeSelect = document.getElementById('bgSizeMode');
-  const bgZoomInput = document.getElementById('bgZoom');
-  const bgPosXInput = document.getElementById('bgPosX');
-  const bgPosYInput = document.getElementById('bgPosY');
-  const bgLoopEffectSelect = document.getElementById('bgLoopEffect');
-  const bgLoopFadeDurationInput = document.getElementById('bgLoopFadeDuration');
+  const bgAssetList = document.getElementById('bgAssetList');
+  const bgAssetEmptyHint = document.getElementById('bgAssetEmptyHint');
+  const bgAssetTrackRow = document.getElementById('bgAssetTrackRow');
   const previewEqToggle = document.getElementById('previewEqToggle');
   const previewRatioFreeBtn = document.getElementById('previewRatioFree');
   const previewRatioVerticalBtn = document.getElementById('previewRatioVertical');
@@ -7213,10 +7224,16 @@ export function createThreeParticleBurst(){
   let previewMode = 'single';   // 'single' | 'all'
   let previewLineEls = {};      // idx -> element, for the "all" view
   let previewActiveIdx = -1;
-  let previewBgUrl = null;
-  let currentBgKind = null; // 'image' | 'video' | null
-  let currentBgFile = null;
-  let bgVisible = true;
+  // B-1: multiple background assets placed on the timeline, replacing the
+  // old single previewBgUrl/currentBgKind/currentBgFile trio. Each asset is
+  // { id, kind:'image'|'video', file, start, end (seconds, null=open-ended),
+  // settings:{sizeMode,zoom,posX,posY,opacity,loopEffect,loopFadeDuration} } -
+  // settings are per-asset per the confirmed design (not shared globally).
+  let bgAssets = [];
+  let bgVisible = true;            // whole-layer show/hide, still global
+  let expandedBgAssetId = null;    // which asset's settings row is open
+  let activeBgAssetId = null;      // whichever asset currently covers audioEl.currentTime
+  const bgRuntime = new Map();     // id -> { url, imageEl } - object URL + lazily-decoded bitmap, never persisted
 
   const SYSTEM_FONTS = [
     { key:'sans', label:'ゴシック（システム）', css: "-apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', 'Segoe UI', sans-serif" },
@@ -7492,52 +7509,52 @@ export function createThreeParticleBurst(){
     return { w: drawW, h: drawH, x: (w - drawW) * posX, y: (h - drawH) * posY };
   }
 
+  function getActiveBgAssetObj(){
+    return bgAssets.find(function(a){ return a.id === activeBgAssetId; }) || null;
+  }
+
   function applyBgVideoLayout(){
-    if(currentBgKind !== 'video') return;
+    const asset = getActiveBgAssetObj();
+    if(!asset || asset.kind !== 'video') return;
     const iw = previewBgVideo.videoWidth, ih = previewBgVideo.videoHeight;
     if(!iw || !ih) return;
     const stageRect = previewStage.getBoundingClientRect();
     const w = stageRect.width, h = stageRect.height;
     if(!w || !h) return;
-    const zoomRaw = parseFloat(bgZoomInput.value);
-    const posXRaw = parseFloat(bgPosXInput.value);
-    const posYRaw = parseFloat(bgPosYInput.value);
-    const rect = computeBgDrawRect(
-      w, h, iw, ih, bgSizeModeSelect.value,
-      isNaN(zoomRaw) ? 100 : zoomRaw,
-      isNaN(posXRaw) ? 50 : posXRaw,
-      isNaN(posYRaw) ? 50 : posYRaw,
-      1
-    );
+    const s = asset.settings;
+    const rect = computeBgDrawRect(w, h, iw, ih, s.sizeMode, s.zoom, s.posX, s.posY, 1);
     previewBgVideo.style.width = rect.w + 'px';
     previewBgVideo.style.height = rect.h + 'px';
     previewBgVideo.style.left = rect.x + 'px';
     previewBgVideo.style.top = rect.y + 'px';
   }
 
-  function applyBgTransform(){
+  // Sets the CSS custom properties the on-screen image path reads
+  // (previewBg's background-size/-position) from one asset's settings, or
+  // resets them when no asset is active. asset=null is a valid, common call
+  // (e.g. a gap in the timeline with nothing covering the current time).
+  function applyBgTransformForAsset(asset){
+    if(!asset){
+      document.documentElement.style.setProperty('--preview-bg-size', 'contain');
+      document.documentElement.style.setProperty('--preview-bg-position', '50% 50%');
+      return;
+    }
+    const s = asset.settings;
     let sizeValue;
-    switch(bgSizeModeSelect.value){
+    switch(s.sizeMode){
       case 'cover': sizeValue = 'cover'; break;
       case 'auto': sizeValue = 'auto'; break;
-      case 'zoom': sizeValue = bgZoomInput.value + '% auto'; break;
+      case 'zoom': sizeValue = s.zoom + '% auto'; break;
       default: sizeValue = 'contain';
     }
     document.documentElement.style.setProperty('--preview-bg-size', sizeValue);
-    document.documentElement.style.setProperty('--preview-bg-position', bgPosXInput.value + '% ' + bgPosYInput.value + '%');
+    document.documentElement.style.setProperty('--preview-bg-position', s.posX + '% ' + s.posY + '%');
     applyBgVideoLayout();
   }
-  bgSizeModeSelect.addEventListener('change', applyBgTransform);
-  [bgZoomInput, bgPosXInput, bgPosYInput].forEach(function(el){
-    el.addEventListener('input', applyBgTransform);
-  });
-  applyBgTransform();
 
-  function applyBgOpacity(){
-    previewBg.style.opacity = bgOpacityInput.value;
+  function applyBgOpacityForAsset(asset){
+    previewBg.style.opacity = asset ? asset.settings.opacity : 1;
   }
-  bgOpacityInput.addEventListener('input', applyBgOpacity);
-  applyBgOpacity();
 
   function applyBgVisibility(){
     previewBg.style.visibility = bgVisible ? '' : 'hidden';
@@ -7572,43 +7589,58 @@ export function createThreeParticleBurst(){
   updatePreviewScale();
 
   // Keep the background video's playback position derived from the audio
-  // element's currentTime (looping via modulo its own duration) instead of
-  // just letting it free-run on its native `loop` attribute - that's what
-  // "連動" (linked to the playback controls) means here, and it's also what
-  // fixes "sometimes doesn't play from 0:00": previously the video kept
-  // whatever position it happened to be at (e.g. from an earlier autoplay)
-  // when playback started, instead of being pinned to the audio's position.
+  // element's currentTime, anchored to when the active asset's own slot
+  // began (not absolute time 0) so a video always starts from its own
+  // frame 0 the instant its window opens, looping via modulo its own
+  // duration from there - rather than just letting it free-run on its
+  // native `loop` attribute or (worse) reading as "already mid-loop" if the
+  // song was seeked into the middle of the asset's window.
   function syncBgVideoToAudio(forceRestart){
-    if(currentBgKind !== 'video') return;
+    const asset = getActiveBgAssetObj();
+    if(!asset || asset.kind !== 'video') return;
     const dur = previewBgVideo.duration;
     if(!dur || !isFinite(dur) || dur <= 0) return;
-    const target = audioEl.currentTime % dur;
-    if(forceRestart || Math.abs(previewBgVideo.currentTime - target) > 0.25){
-      previewBgVideo.currentTime = target;
+    const target = (audioEl.currentTime - asset.start) % dur;
+    const safeTarget = target < 0 ? 0 : target;
+    if(forceRestart || Math.abs(previewBgVideo.currentTime - safeTarget) > 0.25){
+      previewBgVideo.currentTime = safeTarget;
     }
   }
+
+  // Central "what should be showing right now" driver - swaps the active
+  // asset (image decode / video src) only when it actually changes, then
+  // (re)syncs the video position. Called from every audioEl transport event
+  // below, plus after any structural bgAssets edit (add/remove/retime) and
+  // after a project loads.
+  function updateActiveBgAsset(forceRestart){
+    const next = getActiveBgAsset();
+    if((next ? next.id : null) !== activeBgAssetId) switchActiveBgAsset(next);
+    syncBgVideoToAudio(forceRestart);
+  }
+
   audioEl.addEventListener('play', function(){
-    if(currentBgKind !== 'video') return;
-    syncBgVideoToAudio(true);
-    previewBgVideo.play().catch(function(){});
+    updateActiveBgAsset(true);
+    const asset = getActiveBgAssetObj();
+    if(asset && asset.kind === 'video') previewBgVideo.play().catch(function(){});
   });
   audioEl.addEventListener('pause', function(){
-    if(currentBgKind === 'video') previewBgVideo.pause();
+    const asset = getActiveBgAssetObj();
+    if(asset && asset.kind === 'video') previewBgVideo.pause();
   });
-  audioEl.addEventListener('seeking', function(){ syncBgVideoToAudio(true); });
-  audioEl.addEventListener('seeked', function(){ syncBgVideoToAudio(true); });
-  audioEl.addEventListener('timeupdate', function(){ syncBgVideoToAudio(false); });
+  audioEl.addEventListener('seeking', function(){ updateActiveBgAsset(true); });
+  audioEl.addEventListener('seeked', function(){ updateActiveBgAsset(true); });
+  audioEl.addEventListener('timeupdate', function(){ updateActiveBgAsset(false); });
 
-  // Loop-point effect: a background video shorter than the song loops many
-  // times, and a hard cut at the loop point is jarring. "fade" briefly dips
-  // opacity near the wrap-around point. Shared with the canvas export path
-  // (drawCanvasBackground) via the same alpha calculation so on-screen
-  // preview and exported video look identical.
-  function getBgVideoLoopAlpha(){
-    if(currentBgKind !== 'video' || bgLoopEffectSelect.value !== 'fade') return 1;
+  // Loop-point effect: a background video shorter than its assigned slot
+  // loops many times, and a hard cut at the loop point is jarring. "fade"
+  // briefly dips opacity near the wrap-around point. Shared with the canvas
+  // export path (drawCanvasBackground) via the same alpha calculation so
+  // on-screen preview and exported video look identical.
+  function getBgVideoLoopAlpha(asset){
+    if(!asset || asset.kind !== 'video' || asset.settings.loopEffect !== 'fade') return 1;
     const dur = previewBgVideo.duration;
     if(!dur || !isFinite(dur) || dur <= 0) return 1;
-    const fadeDur = Math.min(dur / 2, Math.max(0.05, parseFloat(bgLoopFadeDurationInput.value) || 0.5));
+    const fadeDur = Math.min(dur / 2, Math.max(0.05, asset.settings.loopFadeDuration || 0.5));
     const t = previewBgVideo.currentTime;
     if(t < fadeDur) return clamp(t / fadeDur, 0, 1);
     const toEnd = dur - t;
@@ -7618,35 +7650,30 @@ export function createThreeParticleBurst(){
   let bgVideoFadeRAF = null;
   function bgVideoFadeLoop(){
     bgVideoFadeRAF = requestAnimationFrame(bgVideoFadeLoop);
-    if(currentBgKind !== 'video'){ previewBgVideo.style.opacity = ''; return; }
-    previewBgVideo.style.opacity = getBgVideoLoopAlpha();
+    const asset = getActiveBgAssetObj();
+    if(!asset || asset.kind !== 'video'){ previewBgVideo.style.opacity = ''; return; }
+    previewBgVideo.style.opacity = getBgVideoLoopAlpha(asset);
   }
   bgVideoFadeRAF = requestAnimationFrame(bgVideoFadeLoop);
 
-  let previewBgImageEl = null; // an ImageBitmap (preferred) or HTMLImageElement (fallback)
-  function loadPreviewBgImage(source){
-    if(!source){ previewBgImageEl = null; return; }
-    // CSS background-image (used for the on-screen preview) auto-applies a photo's
-    // EXIF orientation, but a plain `new Image()` + canvas drawImage() historically
-    // does not always do the same — so a rotated phone photo can end up with its
-    // raw (pre-rotation) pixel dimensions used for the cover/contain math here,
-    // producing a completely different crop than what's shown on screen.
-    // createImageBitmap(..., {imageOrientation:'from-image'}) normalizes this so
-    // canvas rendering matches the CSS-rendered preview exactly.
-    if(typeof createImageBitmap === 'function' && source instanceof Blob){
-      createImageBitmap(source, { imageOrientation: 'from-image' })
-        .then(function(bitmap){ previewBgImageEl = bitmap; })
-        .catch(function(){ loadPreviewBgImageFallback(source); });
-    } else if(typeof source === 'string'){
-      loadPreviewBgImageFallback(source);
+  // Lazily decodes+caches one asset's image the first time it becomes
+  // active (not eagerly on add) into bgRuntime's per-asset runtime record.
+  // Same EXIF-orientation-normalizing approach as the old single-background
+  // loadPreviewBgImage() - see that history for why createImageBitmap(...,
+  // {imageOrientation:'from-image'}) is used over a plain `new Image()`.
+  function decodeBgAssetImage(asset, rt){
+    if(typeof createImageBitmap === 'function'){
+      createImageBitmap(asset.file, { imageOrientation: 'from-image' })
+        .then(function(bitmap){ rt.imageEl = bitmap; })
+        .catch(function(){ decodeBgAssetImageFallback(rt); });
     } else {
-      loadPreviewBgImageFallback(URL.createObjectURL(source));
+      decodeBgAssetImageFallback(rt);
     }
   }
-  function loadPreviewBgImageFallback(url){
+  function decodeBgAssetImageFallback(rt){
     const img = new Image();
-    img.src = url;
-    previewBgImageEl = img;
+    img.src = rt.url;
+    rt.imageEl = img;
   }
 
   function clearPreviewBgVideo(){
@@ -7670,47 +7697,322 @@ export function createThreeParticleBurst(){
     }, { once: true });
   }
 
-  function setPreviewBgFile(file){
-    if(previewBgUrl) URL.revokeObjectURL(previewBgUrl);
-    previewBgUrl = URL.createObjectURL(file);
-    currentBgFile = file;
-    currentBgKind = file.type.indexOf('video/') === 0 ? 'video' : 'image';
-    if(currentBgKind === 'video'){
+  // Which asset (if any) covers time `t` (defaults to the current playback
+  // position). bgAssets is kept sorted ascending by `start` and assets never
+  // overlap (enforced by the drag-clamping in the timeline below), so the
+  // first match is the only match.
+  function getActiveBgAsset(t){
+    if(t === undefined) t = audioEl.currentTime;
+    for(let i = 0; i < bgAssets.length; i++){
+      const a = bgAssets[i];
+      if(t >= a.start && (a.end === null || t < a.end)) return a;
+    }
+    return null;
+  }
+
+  // Swaps which asset is actually driving the live preview - a shared
+  // single <video> element re-pointed at whichever video asset is active
+  // (rather than one <video> per asset) since ranges never overlap, so at
+  // most one video is ever live at a time; keeping N decoders resident for
+  // N video assets would be pure waste. Cost: crossing into a new video
+  // asset needs a brief src-reload + loadedmetadata wait, same latency
+  // class as the original single-background file picker.
+  function switchActiveBgAsset(asset){
+    activeBgAssetId = asset ? asset.id : null;
+    clearPreviewBgVideo();
+    if(!asset){
       previewBg.style.backgroundImage = '';
-      previewBgImageEl = null;
-      activateBgVideo(previewBgUrl);
-    } else {
-      clearPreviewBgVideo();
-      previewBg.style.backgroundImage = 'url(' + previewBgUrl + ')';
-      loadPreviewBgImage(file);
+      previewBg.classList.remove('has-image');
+      applyBgTransformForAsset(null);
+      return;
     }
     previewBg.classList.add('has-image');
-    previewBgClearBtn.disabled = false;
-    previewBgVisibleToggle.disabled = false;
+    let rt = bgRuntime.get(asset.id);
+    if(!rt){ rt = { url: URL.createObjectURL(asset.file), imageEl: null }; bgRuntime.set(asset.id, rt); }
+    if(asset.kind === 'video'){
+      previewBg.style.backgroundImage = '';
+      activateBgVideo(rt.url);
+    } else {
+      previewBg.style.backgroundImage = 'url(' + rt.url + ')';
+      if(!rt.imageEl) decodeBgAssetImage(asset, rt);
+    }
+    applyBgTransformForAsset(asset);
+    applyBgOpacityForAsset(asset);
+  }
+
+  function genBgAssetId(){
+    return 'bg_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+  }
+  function makeDefaultBgAssetSettings(){
+    return { sizeMode: 'contain', zoom: 100, posX: 50, posY: 50, opacity: 1, loopEffect: 'none', loopFadeDuration: 0.5 };
+  }
+  const DEFAULT_BG_IMAGE_DURATION_SEC = 5;
+
+  function sortBgAssets(){
+    bgAssets.sort(function(a, b){ return a.start - b.start; });
+  }
+
+  // Appends one asset sequentially after the current last asset's end (or
+  // at 0 for the first one) - the only placement B-1's add flow offers;
+  // dragging it elsewhere on the timeline is how it gets repositioned.
+  function addBgAssetFromFile(file){
+    const kind = file.type.indexOf('video/') === 0 ? 'video' : 'image';
+    const start = bgAssets.length
+      ? Math.max.apply(null, bgAssets.map(function(a){ return a.end === null ? a.start : a.end; }))
+      : 0;
+    const asset = {
+      id: genBgAssetId(), kind: kind, file: file,
+      start: Math.round(start * 100) / 100,
+      end: Math.round((start + DEFAULT_BG_IMAGE_DURATION_SEC) * 100) / 100,
+      settings: makeDefaultBgAssetSettings()
+    };
+    bgAssets.push(asset);
+    sortBgAssets();
+    renderBgAssetList();
+    renderBgAssetTrack();
+    updateActiveBgAsset(true);
+    updateSaveEnabled();
+    scheduleSaveSession();
+
+    if(kind === 'video'){
+      // Probe the real duration asynchronously (independent of the shared
+      // previewBgVideo element, which may be busy with a different asset)
+      // and default the end to it, clamped to the known song length.
+      const probe = document.createElement('video');
+      probe.preload = 'metadata';
+      probe.src = URL.createObjectURL(file);
+      probe.addEventListener('loadedmetadata', function(){
+        const dur = probe.duration;
+        URL.revokeObjectURL(probe.src);
+        if(!dur || !isFinite(dur)) return;
+        const songDur = waveformDurationSec();
+        const maxEnd = songDur > 0 ? asset.start + Math.min(dur, Math.max(0.1, songDur - asset.start)) : asset.start + dur;
+        asset.end = Math.round(maxEnd * 100) / 100;
+        renderBgAssetList();
+        renderBgAssetTrack();
+        updateSaveEnabled();
+        scheduleSaveSession();
+      }, { once: true });
+    }
   }
 
   previewBgInput.addEventListener('change', function(e){
-    const file = e.target.files[0];
-    if(!file) return;
-    setPreviewBgFile(file);
+    const files = Array.prototype.slice.call(e.target.files || []);
+    files.forEach(addBgAssetFromFile);
+    previewBgInput.value = '';
+  });
+
+  function removeBgAsset(id){
+    const idx = bgAssets.findIndex(function(a){ return a.id === id; });
+    if(idx === -1) return;
+    const rt = bgRuntime.get(id);
+    if(rt){ URL.revokeObjectURL(rt.url); bgRuntime.delete(id); }
+    bgAssets.splice(idx, 1);
+    if(expandedBgAssetId === id) expandedBgAssetId = null;
+    renderBgAssetList();
+    renderBgAssetTrack();
+    updateActiveBgAsset(true);
+    updateSaveEnabled();
+    scheduleSaveSession();
+  }
+
+  // Shared by both the "clear all" toolbar button and the full-project-reset
+  // path (clearPreviewBgState) - releases every asset's object URL/decoded
+  // bitmap and empties the array; clearPreviewBgState additionally resets
+  // the global visibility toggle and file input, which "clear all" (a
+  // deliberate user action mid-project) should not touch.
+  function teardownAllBgAssets(){
+    bgRuntime.forEach(function(rt){ URL.revokeObjectURL(rt.url); });
+    bgRuntime.clear();
+    bgAssets = [];
+    expandedBgAssetId = null;
+    switchActiveBgAsset(null);
+    renderBgAssetList();
+    renderBgAssetTrack();
+  }
+
+  previewBgClearBtn.addEventListener('click', function(){
+    if(!bgAssets.length) return;
+    if(!window.confirm('すべての背景素材を削除しますか？')) return;
+    teardownAllBgAssets();
+    updateSaveEnabled();
+    scheduleSaveSession();
   });
 
   function clearPreviewBgState(){
-    if(previewBgUrl) URL.revokeObjectURL(previewBgUrl);
-    previewBgUrl = null;
-    currentBgFile = null;
-    currentBgKind = null;
-    previewBg.style.backgroundImage = '';
-    previewBg.classList.remove('has-image');
-    clearPreviewBgVideo();
-    previewBgClearBtn.disabled = true;
-    previewBgVisibleToggle.disabled = true;
+    teardownAllBgAssets();
     bgVisible = true;
     applyBgVisibility();
     previewBgInput.value = '';
-    loadPreviewBgImage(null);
   }
-  previewBgClearBtn.addEventListener('click', clearPreviewBgState);
+
+  function formatBgTime(sec){
+    if(sec === null || sec === undefined) return '∞';
+    sec = Math.max(0, sec);
+    const m = Math.floor(sec / 60);
+    const s = sec - m * 60;
+    return m + ':' + (s < 10 ? '0' : '') + s.toFixed(1);
+  }
+
+  function refreshBgAssetRowRangeLabel(asset){
+    const row = bgAssetList.querySelector('[data-bg-asset-id="' + asset.id + '"]');
+    if(!row) return;
+    const range = row.querySelector('.bg-asset-range');
+    if(range) range.textContent = formatBgTime(asset.start) + ' – ' + (asset.end === null ? '∞' : formatBgTime(asset.end));
+  }
+
+  function buildBgAssetRowBody(asset){
+    const body = document.createElement('div');
+    body.className = 'bg-asset-row-body';
+
+    function makeRangeControl(labelText, min, max, step, value, onInput){
+      const label = document.createElement('label');
+      label.className = 'preview-control';
+      const span = document.createElement('span');
+      span.textContent = labelText;
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = min; input.max = max; input.step = step; input.value = value;
+      input.addEventListener('input', function(){ onInput(parseFloat(input.value)); });
+      label.appendChild(span); label.appendChild(input);
+      return label;
+    }
+
+    body.appendChild(makeRangeControl('背景の透過度', 0, 1, 0.05, asset.settings.opacity, function(v){
+      asset.settings.opacity = v;
+      if(activeBgAssetId === asset.id) applyBgOpacityForAsset(asset);
+      scheduleSaveSession();
+    }));
+
+    const sizeLabel = document.createElement('label');
+    sizeLabel.className = 'preview-control';
+    const sizeSpan = document.createElement('span'); sizeSpan.textContent = '背景サイズ';
+    const sizeSelect = document.createElement('select');
+    [['contain','フィット（全体表示）'],['cover','画面を覆う（トリミング）'],['auto','原寸大'],['zoom','ズーム（カスタム）']].forEach(function(opt){
+      const o = document.createElement('option'); o.value = opt[0]; o.textContent = opt[1];
+      if(asset.settings.sizeMode === opt[0]) o.selected = true;
+      sizeSelect.appendChild(o);
+    });
+    sizeSelect.addEventListener('change', function(){
+      asset.settings.sizeMode = sizeSelect.value;
+      if(activeBgAssetId === asset.id) applyBgTransformForAsset(asset);
+      scheduleSaveSession();
+    });
+    sizeLabel.appendChild(sizeSpan); sizeLabel.appendChild(sizeSelect);
+    body.appendChild(sizeLabel);
+
+    body.appendChild(makeRangeControl('ズーム', 20, 300, 5, asset.settings.zoom, function(v){
+      asset.settings.zoom = v;
+      if(activeBgAssetId === asset.id) applyBgTransformForAsset(asset);
+      scheduleSaveSession();
+    }));
+    body.appendChild(makeRangeControl('横位置', 0, 100, 1, asset.settings.posX, function(v){
+      asset.settings.posX = v;
+      if(activeBgAssetId === asset.id) applyBgTransformForAsset(asset);
+      scheduleSaveSession();
+    }));
+    body.appendChild(makeRangeControl('縦位置', 0, 100, 1, asset.settings.posY, function(v){
+      asset.settings.posY = v;
+      if(activeBgAssetId === asset.id) applyBgTransformForAsset(asset);
+      scheduleSaveSession();
+    }));
+
+    if(asset.kind === 'video'){
+      const loopLabel = document.createElement('label');
+      loopLabel.className = 'preview-control';
+      const loopSpan = document.createElement('span'); loopSpan.textContent = '動画ループ時エフェクト';
+      const loopSelect = document.createElement('select');
+      [['none','なし'],['fade','フェード']].forEach(function(opt){
+        const o = document.createElement('option'); o.value = opt[0]; o.textContent = opt[1];
+        if(asset.settings.loopEffect === opt[0]) o.selected = true;
+        loopSelect.appendChild(o);
+      });
+      loopSelect.addEventListener('change', function(){
+        asset.settings.loopEffect = loopSelect.value;
+        scheduleSaveSession();
+      });
+      loopLabel.appendChild(loopSpan); loopLabel.appendChild(loopSelect);
+      body.appendChild(loopLabel);
+
+      body.appendChild(makeRangeControl('ループフェード時間(秒)', 0.1, 2, 0.1, asset.settings.loopFadeDuration, function(v){
+        asset.settings.loopFadeDuration = v;
+        scheduleSaveSession();
+      }));
+    }
+
+    return body;
+  }
+
+  // Full rebuild of the asset list panel - called on every structural
+  // change (add/remove asset, expand/collapse) and after project load.
+  // Per-drag-frame updates during a timeline drag use the cheaper
+  // refreshBgAssetRowRangeLabel() instead, matching the C-1 wave timeline's
+  // own full-rebuild-vs-cheap-patch split.
+  function renderBgAssetList(){
+    const hasAssets = bgAssets.length > 0;
+    previewBgClearBtn.disabled = !hasAssets;
+    previewBgVisibleToggle.disabled = !hasAssets;
+    bgAssetEmptyHint.classList.toggle('hidden', hasAssets);
+    bgAssetList.innerHTML = '';
+    const songDur = waveformDurationSec();
+    bgAssets.forEach(function(asset){
+      const row = document.createElement('div');
+      row.className = 'bg-asset-row';
+      row.dataset.bgAssetId = asset.id;
+      if(expandedBgAssetId === asset.id) row.classList.add('expanded');
+
+      const head = document.createElement('div');
+      head.className = 'bg-asset-row-head';
+
+      const badge = document.createElement('span');
+      badge.className = 'bg-asset-kind-badge';
+      badge.textContent = asset.kind === 'video' ? '動画' : '画像';
+      head.appendChild(badge);
+
+      const name = document.createElement('span');
+      name.className = 'bg-asset-name';
+      name.textContent = asset.file.name;
+      name.title = asset.file.name;
+      head.appendChild(name);
+
+      const range = document.createElement('span');
+      range.className = 'bg-asset-range';
+      range.textContent = formatBgTime(asset.start) + ' – ' + (asset.end === null ? '∞' : formatBgTime(asset.end));
+      head.appendChild(range);
+
+      if(songDur > 0 && asset.start > songDur){
+        const warn = document.createElement('span');
+        warn.className = 'bg-asset-warn';
+        warn.textContent = '曲の長さを超えています';
+        head.appendChild(warn);
+      }
+
+      const actions = document.createElement('div');
+      actions.className = 'bg-asset-row-actions';
+      const expandBtn = document.createElement('button');
+      expandBtn.type = 'button';
+      expandBtn.textContent = expandedBgAssetId === asset.id ? '閉じる' : '設定';
+      expandBtn.addEventListener('click', function(){
+        expandedBgAssetId = expandedBgAssetId === asset.id ? null : asset.id;
+        renderBgAssetList();
+      });
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.textContent = '×';
+      delBtn.title = 'この背景素材を削除';
+      delBtn.addEventListener('click', function(){
+        if(!window.confirm('この背景素材を削除しますか？')) return;
+        removeBgAsset(asset.id);
+      });
+      actions.appendChild(expandBtn);
+      actions.appendChild(delBtn);
+      head.appendChild(actions);
+
+      row.appendChild(head);
+      row.appendChild(buildBgAssetRowBody(asset));
+      bgAssetList.appendChild(row);
+    });
+  }
 
   /* ===================== Graphic equalizer ===================== */
   let audioCtx = null;
@@ -9995,14 +10297,12 @@ export function createThreeParticleBurst(){
       previewMode: previewMode,
       previewRatio: ratio,
       font: getFontSettings(),
+      // Per-asset transform settings (sizeMode/zoom/pos/opacity/loopEffect)
+      // now live inside each bgAssets entry (project persistence, not this
+      // portable style JSON) since B-1 - there's no longer one shared
+      // "the" background to describe here. Only the global show/hide
+      // toggle is still a meaningful portable style preference.
       background: {
-        sizeMode: bgSizeModeSelect.value,
-        zoom: bgZoomInput.value,
-        posX: bgPosXInput.value,
-        posY: bgPosYInput.value,
-        loopEffect: bgLoopEffectSelect.value,
-        loopFadeDuration: bgLoopFadeDurationInput.value,
-        opacity: bgOpacityInput.value,
         visible: bgVisible
       },
       highlightMode: previewAll.classList.contains('highlight-text-only') ? 'text' : 'line',
@@ -10107,18 +10407,8 @@ export function createThreeParticleBurst(){
     else if(obj.highlightMode === 'line') highlightModeLineBtn.click();
 
     const bg = obj.background || {};
-    const bgModeOptionExists = Array.prototype.some.call(bgSizeModeSelect.options, function(o){ return o.value === bg.sizeMode; });
-    if(typeof bg.zoom !== 'undefined') bgZoomInput.value = clampInputValue(bgZoomInput, bg.zoom, bgZoomInput.value);
-    if(typeof bg.posX !== 'undefined') bgPosXInput.value = clampInputValue(bgPosXInput, bg.posX, bgPosXInput.value);
-    if(typeof bg.posY !== 'undefined') bgPosYInput.value = clampInputValue(bgPosYInput, bg.posY, bgPosYInput.value);
-    if(bgModeOptionExists) bgSizeModeSelect.value = bg.sizeMode;
-    if(['none','fade'].indexOf(bg.loopEffect) !== -1) bgLoopEffectSelect.value = bg.loopEffect;
-    if(typeof bg.loopFadeDuration !== 'undefined') bgLoopFadeDurationInput.value = clampInputValue(bgLoopFadeDurationInput, bg.loopFadeDuration, bgLoopFadeDurationInput.value);
-    if(typeof bg.opacity !== 'undefined') bgOpacityInput.value = clampInputValue(bgOpacityInput, bg.opacity, bgOpacityInput.value);
-    applyBgOpacity();
     bgVisible = typeof bg.visible === 'boolean' ? bg.visible : true;
     applyBgVisibility();
-    applyBgTransform();
 
     setEqStyle(sanitizeEqStyle(obj.eq));
 
@@ -10227,17 +10517,20 @@ export function createThreeParticleBurst(){
 
   function getBgDrawSource(){
     if(!bgVisible) return null;
-    if(currentBgKind === 'video'){
+    const asset = getActiveBgAsset();
+    if(!asset) return null;
+    if(asset.kind === 'video'){
       const v = previewBgVideo;
-      if(v.readyState >= 2 && v.videoWidth) return { el: v, w: v.videoWidth, h: v.videoHeight };
+      if(v.readyState >= 2 && v.videoWidth) return { el: v, w: v.videoWidth, h: v.videoHeight, asset: asset };
       return null;
     }
-    const img = previewBgImageEl;
+    const rt = bgRuntime.get(asset.id);
+    const img = rt && rt.imageEl;
     if(!img) return null;
     const isBitmap = typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap;
     const ready = isBitmap || (img.complete && img.naturalWidth);
     if(!ready) return null;
-    return { el: img, w: isBitmap ? img.width : img.naturalWidth, h: isBitmap ? img.height : img.naturalHeight };
+    return { el: img, w: isBitmap ? img.width : img.naturalWidth, h: isBitmap ? img.height : img.naturalHeight, asset: asset };
   }
 
   function drawCanvasBackground(ctx, w, h, scale){
@@ -10257,19 +10550,23 @@ export function createThreeParticleBurst(){
     // reachable position (fully left/top) and is falsy, so `0 || 50` would
     // silently discard it and re-center the crop, unlike the on-screen CSS/
     // video-layout path (applyBgVideoLayout / computeBgDrawRect) which shares
-    // this exact same computeBgDrawRect() call.
-    const zoomRaw = parseFloat(bgZoomInput.value);
-    const posXRaw = parseFloat(bgPosXInput.value);
-    const posYRaw = parseFloat(bgPosYInput.value);
+    // this exact same computeBgDrawRect() call. Per-asset settings are
+    // already sanitized numbers (see makeDefaultBgAssetSettings()), but the
+    // isNaN guard is kept for safety against a hand-edited/older project file.
+    const s = source.asset.settings;
+    const zoomRaw = parseFloat(s.zoom);
+    const posXRaw = parseFloat(s.posX);
+    const posYRaw = parseFloat(s.posY);
     const rect = computeBgDrawRect(
-      w, h, source.w, source.h, bgSizeModeSelect.value,
+      w, h, source.w, source.h, s.sizeMode,
       isNaN(zoomRaw) ? 100 : zoomRaw,
       isNaN(posXRaw) ? 50 : posXRaw,
       isNaN(posYRaw) ? 50 : posYRaw,
       scale
     );
     const prevAlpha = ctx.globalAlpha;
-    ctx.globalAlpha = prevAlpha * getBgVideoLoopAlpha() * parseFloat(bgOpacityInput.value);
+    const opacityRaw = parseFloat(s.opacity);
+    ctx.globalAlpha = prevAlpha * getBgVideoLoopAlpha(source.asset) * (isNaN(opacityRaw) ? 1 : opacityRaw);
     ctx.drawImage(source.el, rect.x, rect.y, rect.w, rect.h);
     ctx.globalAlpha = prevAlpha;
     if(previewBg.classList.contains('has-image')){
@@ -11675,10 +11972,168 @@ export function createThreeParticleBurst(){
       el.style.left = g.left + 'px';
       el.style.width = g.width + 'px';
     });
+    repositionAllBgAssetBlocks();
     const durationSec = waveformDurationSec();
     const minWidth = waveScrollArea.clientWidth || 0;
     waveScrollInner.style.width = Math.max(minWidth, durationSec * waveZoomPxPerSec) + 'px';
     redrawWaveCanvas();
+  }
+
+  /* -------- B-1: background-asset track, sharing this same time axis -------- */
+  // Reuses the C-1 wave-timeline's visual/interaction pattern (absolutely
+  // positioned time-mapped blocks with edge-handles, Pointer Events +
+  // setPointerCapture, full-rebuild-vs-cheap-patch split) but as independent,
+  // adapted functions rather than shared generic ones - background assets
+  // must never overlap in time (lyric lines are deliberately allowed to,
+  // for transition effects), so a shared function would need a branch
+  // parameter for that rule on every call; keeping them separate avoids
+  // entangling two different validation rules into one already-shipping
+  // C-1 code path.
+  function bgAssetBlockGeometry(asset){
+    const start = asset.start;
+    const end = asset.end === null ? start + 2 : asset.end;
+    return { left: start * waveZoomPxPerSec, width: Math.max(4, (end - start) * waveZoomPxPerSec) };
+  }
+
+  function refreshBgAssetBlock(asset){
+    const el = bgAssetTrackRow.querySelector('[data-bg-asset-id="' + asset.id + '"]');
+    if(!el) return;
+    const g = bgAssetBlockGeometry(asset);
+    el.style.left = g.left + 'px';
+    el.style.width = g.width + 'px';
+    el.classList.toggle('open-ended', asset.end === null);
+  }
+
+  function repositionAllBgAssetBlocks(){
+    bgAssetTrackRow.querySelectorAll('.bg-asset-block').forEach(function(el){
+      const asset = bgAssets.find(function(a){ return a.id === el.dataset.bgAssetId; });
+      if(!asset) return;
+      const g = bgAssetBlockGeometry(asset);
+      el.style.left = g.left + 'px';
+      el.style.width = g.width + 'px';
+    });
+  }
+
+  // bgAssets is kept sorted by `start` (sortBgAssets(), called after every
+  // structural edit), so a given asset's array neighbors are exactly its
+  // timeline neighbors.
+  function bgAssetNeighbors(asset){
+    const idx = bgAssets.indexOf(asset);
+    return {
+      prev: idx > 0 ? bgAssets[idx - 1] : null,
+      next: idx !== -1 && idx < bgAssets.length - 1 ? bgAssets[idx + 1] : null
+    };
+  }
+
+  // Overlap prevention (the confirmed B-1 design: hard-clamp at the
+  // neighbor's boundary, no push/cascade) lives here so both the edge-handle
+  // drag and the whole-block move drag share one rule.
+  function commitBgAssetTime(asset, field, sec){
+    const neighbors = bgAssetNeighbors(asset);
+    if(field === 'start'){
+      const min = neighbors.prev ? (neighbors.prev.end === null ? neighbors.prev.start : neighbors.prev.end) : 0;
+      const max = asset.end === null ? Infinity : asset.end - 0.1;
+      asset.start = Math.round(clamp(sec, min, max) * 100) / 100;
+    } else {
+      const min = asset.start + 0.1;
+      const max = neighbors.next ? neighbors.next.start : Infinity;
+      asset.end = Math.round(clamp(sec, min, max) * 100) / 100;
+    }
+    updateSaveEnabled();
+    scheduleSaveSession();
+  }
+
+  function attachBgAssetHandleDrag(handleEl, asset, field){
+    let dragging = false;
+    handleEl.addEventListener('pointerdown', function(ev){
+      dragging = true;
+      handleEl.setPointerCapture(ev.pointerId);
+      ev.stopPropagation();
+    });
+    handleEl.addEventListener('pointermove', function(ev){
+      if(!dragging) return;
+      const rect = waveScrollArea.getBoundingClientRect();
+      const x = ev.clientX - rect.left + waveScrollArea.scrollLeft;
+      const rawSec = x / waveZoomPxPerSec;
+      commitBgAssetTime(asset, field, Math.round(rawSec * 100) / 100);
+      refreshBgAssetBlock(asset);
+      refreshBgAssetRowRangeLabel(asset);
+      updateActiveBgAsset(true);
+    });
+    ['pointerup', 'pointercancel'].forEach(function(evName){
+      handleEl.addEventListener(evName, function(){ dragging = false; });
+    });
+  }
+
+  // Moves the whole asset (both edges shift by the same delta, preserving
+  // duration), clamped against both neighbors so it can't be dragged into
+  // either one - same idea as attachBlockMoveDrag()'s "clamp the delta"
+  // approach, extended from "just non-negative" to "between both neighbors".
+  function attachBgAssetMoveDrag(blockEl, asset){
+    let dragging = false;
+    let startClientX = 0, startAssetStart = 0, startAssetEnd = null;
+    blockEl.addEventListener('pointerdown', function(ev){
+      dragging = true;
+      startClientX = ev.clientX;
+      startAssetStart = asset.start;
+      startAssetEnd = asset.end;
+      blockEl.setPointerCapture(ev.pointerId);
+      ev.stopPropagation();
+    });
+    blockEl.addEventListener('pointermove', function(ev){
+      if(!dragging) return;
+      let dSec = Math.round(((ev.clientX - startClientX) / waveZoomPxPerSec) * 100) / 100;
+      const neighbors = bgAssetNeighbors(asset);
+      const minStart = neighbors.prev ? (neighbors.prev.end === null ? neighbors.prev.start : neighbors.prev.end) : 0;
+      if(startAssetStart + dSec < minStart) dSec = minStart - startAssetStart;
+      if(startAssetEnd !== null && neighbors.next){
+        const duration = startAssetEnd - startAssetStart;
+        const maxStart = neighbors.next.start - duration;
+        if(startAssetStart + dSec > maxStart) dSec = maxStart - startAssetStart;
+      }
+      asset.start = Math.round((startAssetStart + dSec) * 100) / 100;
+      if(startAssetEnd !== null) asset.end = Math.round((startAssetEnd + dSec) * 100) / 100;
+      updateSaveEnabled();
+      scheduleSaveSession();
+      refreshBgAssetBlock(asset);
+      refreshBgAssetRowRangeLabel(asset);
+      updateActiveBgAsset(true);
+    });
+    ['pointerup', 'pointercancel'].forEach(function(evName){
+      blockEl.addEventListener(evName, function(){ dragging = false; });
+    });
+  }
+
+  // Full rebuild of the bg-asset block track - called from addBgAssetFromFile/
+  // removeBgAsset/teardownAllBgAssets (structural changes) and after project
+  // load. Per-drag-frame updates never go through this - see
+  // refreshBgAssetBlock().
+  function renderBgAssetTrack(){
+    bgAssetTrackRow.innerHTML = '';
+    bgAssets.forEach(function(asset){
+      const block = document.createElement('div');
+      block.className = 'bg-asset-block';
+      block.dataset.bgAssetId = asset.id;
+      if(asset.end === null) block.classList.add('open-ended');
+      if(asset.id === activeBgAssetId) block.classList.add('current');
+      const g = bgAssetBlockGeometry(asset);
+      block.style.left = g.left + 'px';
+      block.style.width = g.width + 'px';
+      block.textContent = asset.file.name;
+      block.title = asset.file.name;
+
+      const startHandle = document.createElement('div');
+      startHandle.className = 'bg-asset-handle start';
+      const endHandle = document.createElement('div');
+      endHandle.className = 'bg-asset-handle end';
+      block.appendChild(startHandle);
+      block.appendChild(endHandle);
+      attachBgAssetHandleDrag(startHandle, asset, 'start');
+      attachBgAssetHandleDrag(endHandle, asset, 'end');
+      attachBgAssetMoveDrag(block, asset);
+
+      bgAssetTrackRow.appendChild(block);
+    });
   }
 
   function attachHandleDrag(handleEl, line, field, blockEl){
@@ -11802,7 +12257,7 @@ export function createThreeParticleBurst(){
   // live and no seek happens.
   const WAVE_PAN_THRESHOLD_PX = 4;
   waveScrollArea.addEventListener('pointerdown', function(ev){
-    if(ev.target.closest('.wave-handle, .wave-block')) return;
+    if(ev.target.closest('.wave-handle, .wave-block, .bg-asset-handle, .bg-asset-block')) return;
     if(!audioEl.src) return;
     let panning = false;
     const startClientX = ev.clientX;
@@ -12550,8 +13005,7 @@ export function createThreeParticleBurst(){
       updatedAt: Date.now(),
       audioFile: null,
       audioFileName: '未選択',
-      bgImageFile: null,
-      bgKind: null,
+      bgAssets: [],
       lyricsFileName: '未選択',
       lyricsLines: [],
       uid: 1,
@@ -12660,8 +13114,9 @@ export function createThreeParticleBurst(){
         updatedAt: Date.now(),
         audioFile: currentAudioFile || null,
         audioFileName: audioFileName.textContent,
-        bgImageFile: currentBgFile || null,
-        bgKind: currentBgKind || null,
+        bgAssets: bgAssets.map(function(a){
+          return { id: a.id, kind: a.kind, file: a.file, start: a.start, end: a.end, settings: a.settings };
+        }),
         lyricsFileName: lyricsFileName.textContent,
         lyricsLines: lyricsLines,
         uid: uid,
@@ -12736,22 +13191,47 @@ export function createThreeParticleBurst(){
     }
 
     clearPreviewBgState();
-    if(record.bgImageFile){
-      currentBgFile = record.bgImageFile;
-      currentBgKind = record.bgKind || 'image'; // older saved records predate video support
-      previewBgUrl = URL.createObjectURL(record.bgImageFile);
-      if(currentBgKind === 'video'){
-        previewBg.style.backgroundImage = '';
-        previewBgImageEl = null;
-        activateBgVideo(previewBgUrl);
-      } else {
-        previewBg.style.backgroundImage = 'url(' + previewBgUrl + ')';
-        loadPreviewBgImage(record.bgImageFile);
-      }
-      previewBg.classList.add('has-image');
-      previewBgClearBtn.disabled = false;
-      previewBgVisibleToggle.disabled = false;
+    if(Array.isArray(record.bgAssets) && record.bgAssets.length){
+      bgAssets = record.bgAssets.map(function(a){
+        return {
+          id: a.id || genBgAssetId(),
+          kind: a.kind === 'video' ? 'video' : 'image',
+          file: a.file,
+          start: typeof a.start === 'number' ? a.start : 0,
+          end: (a.end === null || typeof a.end === 'number') ? a.end : null,
+          settings: Object.assign(makeDefaultBgAssetSettings(), a.settings || {})
+        };
+      });
+    } else if(record.bgImageFile){
+      // Legacy single-background migration: older project records (and the
+      // very-old single-session shape promoted by initProjects()) predate
+      // bgAssets entirely and instead carry one bgImageFile/bgKind plus
+      // transform settings under previewSettings.background. Folded into a
+      // single open-ended asset spanning the whole song.
+      const legacyBg = (record.previewSettings && record.previewSettings.background) || {};
+      bgAssets = [{
+        id: genBgAssetId(),
+        kind: record.bgKind === 'video' ? 'video' : 'image',
+        file: record.bgImageFile,
+        start: 0,
+        end: null,
+        settings: {
+          sizeMode: legacyBg.sizeMode || 'contain',
+          zoom: typeof legacyBg.zoom !== 'undefined' ? parseFloat(legacyBg.zoom) : 100,
+          posX: typeof legacyBg.posX !== 'undefined' ? parseFloat(legacyBg.posX) : 50,
+          posY: typeof legacyBg.posY !== 'undefined' ? parseFloat(legacyBg.posY) : 50,
+          opacity: typeof legacyBg.opacity !== 'undefined' ? parseFloat(legacyBg.opacity) : 1,
+          loopEffect: legacyBg.loopEffect === 'fade' ? 'fade' : 'none',
+          loopFadeDuration: typeof legacyBg.loopFadeDuration !== 'undefined' ? parseFloat(legacyBg.loopFadeDuration) : 0.5
+        }
+      }];
+    } else {
+      bgAssets = [];
     }
+    sortBgAssets();
+    renderBgAssetList();
+    renderBgAssetTrack();
+    updateActiveBgAsset(true);
 
     applyFullPreviewSettings(record.previewSettings || DEFAULT_PREVIEW_SETTINGS);
 
