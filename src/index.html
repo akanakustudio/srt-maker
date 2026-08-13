@@ -482,7 +482,7 @@
      popup is open, so the live canvas/video keep rendering with no
      duplicated state; see openPreviewPopup()/closePreviewPopup(). */
   .preview-popup{
-    position:fixed;top:88px;right:24px;width:420px;height:340px;
+    position:fixed;top:88px;left:24px;width:420px;height:340px;
     min-width:260px;min-height:200px;resize:both;overflow:hidden;
     background:#0d0f13;border:1px solid var(--line);border-radius:12px;
     box-shadow:0 20px 60px rgba(0,0,0,.55);z-index:80;
@@ -11145,6 +11145,45 @@ export function createThreeParticleBurst(){
   // is never duplicated or interrupted.
   let popupHomeParent = null, popupHomeNextSibling = null, isPopupOpen = false;
 
+  // Position/size are remembered per-browser (localStorage), not per-project:
+  // this is window geometry, the same kind of thing a desktop app remembers
+  // regardless of which document you have open, not project content. If
+  // nothing has ever been saved, the CSS default (top-left of the app) applies.
+  const POPUP_GEOMETRY_KEY = 'srt-maker-popup-geometry';
+
+  function savePopupGeometry(){
+    if(!isPopupOpen) return;
+    try {
+      const rect = previewPopup.getBoundingClientRect();
+      localStorage.setItem(POPUP_GEOMETRY_KEY, JSON.stringify({
+        left: rect.left, top: rect.top, width: rect.width, height: rect.height
+      }));
+    } catch(e){}
+  }
+
+  let popupGeometrySaveTimer = null;
+  function schedulePopupGeometrySave(){
+    if(popupGeometrySaveTimer) clearTimeout(popupGeometrySaveTimer);
+    popupGeometrySaveTimer = setTimeout(savePopupGeometry, 300);
+  }
+
+  function applyPopupGeometry(){
+    let g = null;
+    try { g = JSON.parse(localStorage.getItem(POPUP_GEOMETRY_KEY) || 'null'); } catch(e){ g = null; }
+    if(!g || typeof g.left !== 'number' || typeof g.top !== 'number') return;
+    const maxLeft = Math.max(0, window.innerWidth - 100);
+    const maxTop = Math.max(0, window.innerHeight - 60);
+    previewPopup.style.right = 'auto';
+    previewPopup.style.left = clamp(g.left, 0, maxLeft) + 'px';
+    previewPopup.style.top = clamp(g.top, 0, maxTop) + 'px';
+    if(typeof g.width === 'number') previewPopup.style.width = clamp(g.width, 260, window.innerWidth) + 'px';
+    if(typeof g.height === 'number') previewPopup.style.height = clamp(g.height, 200, window.innerHeight) + 'px';
+  }
+  applyPopupGeometry();
+  if(typeof ResizeObserver !== 'undefined'){
+    new ResizeObserver(function(){ schedulePopupGeometrySave(); }).observe(previewPopup);
+  }
+
   function openPreviewPopup(){
     if(isPopupOpen) return;
     popupHomeParent = previewStageOuter.parentNode;
@@ -11194,7 +11233,10 @@ export function createThreeParticleBurst(){
       previewPopup.style.top = clamp(startTop + dy, 0, maxTop) + 'px';
     });
     ['pointerup', 'pointercancel'].forEach(function(evName){
-      previewPopupHead.addEventListener(evName, function(){ dragging = false; });
+      previewPopupHead.addEventListener(evName, function(){
+        if(dragging) schedulePopupGeometrySave();
+        dragging = false;
+      });
     });
   })();
 
