@@ -6173,7 +6173,16 @@ export function createThreeSpikeOrb(){
 export function createThreeGridBox(){
   const COLS = 40, ROWS = 18;
   const CELL = 0.22;
-  const MIN_H = 0.05, MAX_H = 3.4;
+  // MIN_H used to be small (0.05) because the old lit MeshStandardMaterial
+  // gave even a tiny cube a visible specular highlight from the point
+  // lights, so a "silent" bar still read as a faint sparkle. Now that the
+  // bars are unlit MeshBasicMaterial (see needleMat/frontMat below - no
+  // lights to fake that visibility), a bar that small is just a few
+  // sub-pixel-ish fragments and disappears entirely during quiet passages,
+  // making the color pattern look like it "isn't applying" when it's really
+  // just too small to see. Raised so every cell keeps a small but genuinely
+  // visible resting nub regardless of amplitude.
+  const MIN_H = 0.3, MAX_H = 3.4;
   const ROW_INTERVAL_MS = 100;
   const SIZE_X = COLS * CELL;
   const SIZE_Z = ROWS * CELL;
@@ -6190,14 +6199,16 @@ export function createThreeGridBox(){
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.5);
-  scene.add(ambient);
-  const light1 = new THREE.PointLight(0x7fe9ff, 3, 40);
-  light1.position.set(4, 6, 6);
-  scene.add(light1);
-  const light2 = new THREE.PointLight(0xff5fd6, 2.4, 40);
-  light2.position.set(-3, 3, -4);
-  scene.add(light2);
+  // No scene lights: every reactive needle bar (see historyMeshes/frontMesh
+  // below) is its own unlit MeshBasicMaterial with a directly-set `color`,
+  // so it renders exactly as specified. An earlier version lit them with
+  // MeshStandardMaterial under two point lights that were themselves
+  // tinted to colorStart/colorEnd for ambient mood, but that let the
+  // lighting dominate the shading: every bar read as roughly "whichever
+  // light points at it" regardless of its own color, so the front row
+  // never actually looked white and the gradient never actually showed
+  // colorEnd anywhere. The static reference grid (LineBasicMaterial) was
+  // already unlit and unaffected either way.
 
   // Everything (reference grid box + the reactive needle grid) lives in one
   // content group so a single slow rotation shows all three grid faces over
@@ -6249,18 +6260,39 @@ export function createThreeGridBox(){
 
   // ---- Reactive needle grid: one thin bar per (frequency column, history
   // row), rising from the floor just in front of the back wall.
-  const COUNT = COLS * ROWS;
+  //
+  // History rows (r=1..ROWS-1, the color-pattern rows) are each their own
+  // plain THREE.Mesh with its own MeshBasicMaterial (solid `color`, set
+  // directly - no vertex/instance color). This used to be one shared
+  // InstancedMesh with per-instance colors via setColorAt(); that rendered
+  // correctly in this session's own testing (headless Chromium/SwiftShader)
+  // but reportedly came out solid black on the reporting user's real GPU,
+  // with no console error either side - consistent with an
+  // InstancedMesh-per-instance-color compatibility gap on some WebGL
+  // driver/GPU combination rather than a logic bug (the front row below,
+  // which never needed per-instance color, has worked throughout). A
+  // plain Mesh's own `material.color` is the most basic, universally
+  // supported way to color a 3D object in Three.js, at the cost of one
+  // draw call per bar instead of one for the whole row - COUNT (COLS*
+  // (ROWS-1), currently 680) individual flat-shaded boxes is still cheap
+  // for a background visualizer.
+  const COUNT = COLS * (ROWS - 1);
   const needleGeo = new THREE.BoxGeometry(CELL * 0.3, 1, CELL * 0.3);
-  const needleMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff, metalness: 0.2, roughness: 0.4,
-    emissive: 0x14324a, emissiveIntensity: 0.7
-  });
-  const mesh = new THREE.InstancedMesh(needleGeo, needleMat, COUNT);
-  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  content.add(mesh);
+  const historyMeshes = new Array(COUNT);
+  for(let i = 0; i < COUNT; i++){
+    const m = new THREE.Mesh(needleGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    content.add(m);
+    historyMeshes[i] = m;
+  }
+
+  const frontGeo = new THREE.BoxGeometry(CELL * 0.3, 1, CELL * 0.3);
+  const frontMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const frontMesh = new THREE.InstancedMesh(frontGeo, frontMat, COLS);
+  frontMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  content.add(frontMesh);
 
   const dummy = new THREE.Object3D();
-  const heights = new Float32Array(COUNT);
+  const heights = new Float32Array(COLS * ROWS); // indexed by r*COLS+c regardless of which mesh a row renders into
   const history = [];
   for(let r = 0; r < ROWS; r++) history.push(new Float32Array(COLS));
 
@@ -6274,7 +6306,12 @@ export function createThreeGridBox(){
   const WHITE = new THREE.Color(0xffffff);
 
   function xOf(c){ return (c + 0.5) * CELL; }
-  function zOf(r){ return -(r + 0.5) * CELL; }
+  // r=0 is always the current/newest history row (resampleInto() writes
+  // straight into history[0] every frame - see update()). Mapping it to the
+  // far end of the depth range (ROWS-1-r instead of r) puts current data at
+  // the near/front row and lets it age toward the back as it scrolls through
+  // history - the reverse of the original front-to-back time flow.
+  function zOf(r){ return -((ROWS - 1 - r) + 0.5) * CELL; }
 
   function resampleInto(row, values){
     const n = values.length;
@@ -6287,9 +6324,6 @@ export function createThreeGridBox(){
   function applyColors(colorStartHex, colorEndHex){
     lastColorStart = colorStartHex; lastColorEnd = colorEndHex;
     tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
-    light1.color.copy(tmpColorA);
-    light2.color.copy(tmpColorB);
-    needleMat.emissive.copy(tmpColorA).multiplyScalar(0.35);
   }
 
   function update(values, eqStyle, w, h){
@@ -6315,7 +6349,6 @@ export function createThreeGridBox(){
     const contrast = eqStyle.threeContrast || 1;
     const thickness = eqStyle.threeThickness || 1;
     const colorByAmplitude = eqStyle.threeColorMode === 'amplitude';
-    ambient.intensity = 0.5 / Math.max(0.5, contrast);
     let frontSum = 0;
     for(let r = 0; r < ROWS; r++){
       const row = history[r];
@@ -6323,28 +6356,46 @@ export function createThreeGridBox(){
       const fade = 1 - (r / ROWS) * 0.6;
       const smoothing = r === 0 ? 0.55 : 0.4;
       for(let c = 0; c < COLS; c++){
-        const idx = r * COLS + c;
+        const stateIdx = r * COLS + c;
         const v = row[c];
         if(r === 0) frontSum += v;
+        // Every row uses the exact same height formula/scale, front or
+        // history: a column's bar must look identical the instant before
+        // and after it ages from r=0 into r=1, or that transition reads as
+        // a jarring size jump instead of the intended "current row scrolls
+        // smoothly back into history" effect. (An earlier version capped
+        // the front row's height/thickness below the history rows' as a
+        // fix for a suspected occlusion issue at certain rotation angles -
+        // that turned out not to be the real bug, so it's been reverted.)
         const targetH = MIN_H + v * reactivity * MAX_H;
-        heights[idx] += (targetH - heights[idx]) * smoothing;
-        const hgt = Math.max(MIN_H, heights[idx]);
+        heights[stateIdx] += (targetH - heights[stateIdx]) * smoothing;
+        const hgt = Math.max(MIN_H, heights[stateIdx]);
 
         dummy.position.set(xOf(c), hgt / 2, z);
         dummy.scale.set(thickness, hgt, thickness);
-        dummy.updateMatrix();
-        mesh.setMatrixAt(idx, dummy.matrix);
 
-        const t = colorByAmplitude ? v : c / (COLS - 1 || 1);
-        cellColor.copy(tmpColorA).lerp(tmpColorB, t);
-        cellColor.lerp(WHITE, Math.min(0.6, v * 0.55) / contrast);
-        cellColor.multiplyScalar(fade);
-        mesh.setColorAt(idx, cellColor);
+        if(r === 0){
+          // Current/frontmost row: its own unlit mesh, always pure white on
+          // screen regardless of the (color-pattern-tinted) point lights.
+          dummy.updateMatrix();
+          frontMesh.setMatrixAt(c, dummy.matrix);
+        } else {
+          const t = colorByAmplitude ? v : c / (COLS - 1 || 1);
+          cellColor.copy(tmpColorA).lerp(tmpColorB, t);
+          cellColor.lerp(WHITE, Math.min(0.6, v * 0.55) / contrast);
+          cellColor.multiplyScalar(fade);
+          const meshIdx = (r - 1) * COLS + c;
+          const m = historyMeshes[meshIdx];
+          m.position.copy(dummy.position);
+          m.scale.copy(dummy.scale);
+          m.material.color.copy(cellColor);
+        }
       }
     }
-    mesh.instanceMatrix.needsUpdate = true;
-    if(mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    needleMat.emissiveIntensity = (0.5 + (frontSum / COLS) * 1.2) * contrast;
+    frontMesh.instanceMatrix.needsUpdate = true;
+    // Pulse the current row's brightness with its own average level - the
+    // closest unlit equivalent of the old emissiveIntensity-driven glow.
+    frontMat.color.setScalar(0.55 + Math.min(1, (frontSum / COLS) * 1.4) * 0.45);
 
     const elapsed = (now - startTime) / 1000;
     const rotSpeed = eqStyle.threeRotationSpeed || 1;
@@ -6364,7 +6415,9 @@ export function createThreeGridBox(){
 
   function dispose(){
     needleGeo.dispose();
-    needleMat.dispose();
+    historyMeshes.forEach(function(m){ m.material.dispose(); });
+    frontGeo.dispose();
+    frontMat.dispose();
     gridGeos.forEach(function(g){ g.dispose(); });
     gridMats.forEach(function(m){ m.dispose(); });
     renderer.dispose();
