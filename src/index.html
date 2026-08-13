@@ -5835,10 +5835,18 @@ export function createThreeWaveGrid(){
         m.position.set(xOf(c), hgt / 2, z);
         m.scale.set(thickness, hgt, thickness);
 
-        const t = colorByAmplitude ? v : c / (COLS - 1 || 1);
-        cellColor.copy(tmpColorA).lerp(tmpColorB, t);
-        cellColor.lerp(WHITE, Math.min(0.55, v * 0.5) / contrast);
-        cellColor.multiplyScalar(fade);
+        if(r === 0){
+          // Current/frontmost row: always pure white (brightness pulses with
+          // its own level) so it reads as "now" and stands out from the
+          // color-pattern history rows behind it - same idea as
+          // createThreeGridBox()'s frontMesh.
+          cellColor.setScalar(Math.min(1, 0.55 + v * 0.45 * contrast));
+        } else {
+          const t = colorByAmplitude ? v : c / (COLS - 1 || 1);
+          cellColor.copy(tmpColorA).lerp(tmpColorB, t);
+          cellColor.lerp(WHITE, Math.min(0.55, v * 0.5) / contrast);
+          cellColor.multiplyScalar(fade);
+        }
         m.material.color.copy(cellColor);
       }
     }
