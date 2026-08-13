@@ -258,6 +258,63 @@
   .table-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;}
   .table-toolbar .ghost-btn.small{padding:7px 12px;font-size:12px;}
   .table-toolbar .hint{font-size:11.5px;color:var(--muted2);}
+  .bulk-shift-group{display:flex;align-items:stretch;gap:6px;}
+  .bulk-shift-steppers{display:flex;gap:4px;}
+  .bulk-shift-step-btn{padding:7px 9px;font-family:var(--mono);}
+
+  /* ---------- Waveform + lyric timeline (C-1) ---------- */
+  .wave-timeline{
+    border:1px solid var(--line);border-radius:10px;background:var(--panel);
+    padding:8px 10px;margin-bottom:8px;
+  }
+  .wave-timeline-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;flex-wrap:wrap;}
+  .wave-timeline-head .hint{font-size:11.5px;color:var(--muted2);}
+  .wave-head-left{display:flex;align-items:center;gap:10px;}
+  .wave-transport-group{display:flex;align-items:center;gap:4px;}
+  .wave-transport-group .rowbtn{width:22px;height:22px;}
+  /* Horizontal (time-axis) and vertical (amplitude) zoom are the same kind
+     of control - a continuous range slider - styled identically, grouped
+     together as one cluster with a divider between the two axes. */
+  .wave-zoom-controls{display:flex;align-items:center;gap:12px;}
+  .wave-zoom-controls .wave-zoom-group{padding-right:12px;border-right:1px solid var(--line);}
+  .wave-zoom-group,.wave-vzoom-group{display:flex;align-items:center;gap:6px;}
+  .wave-vzoom-label{font-size:11px;color:var(--muted2);}
+  .wave-zoom-group input[type=range],.wave-vzoom-group input[type=range]{width:80px;accent-color:var(--accent);}
+  /* Canvas/playhead must NOT live inside .wave-scroll-area: an absolutely
+     positioned element still scrolls along with its containing block when
+     that block is the one with overflow:auto, so putting them there made
+     them physically scroll out of view instead of staying pinned as a
+     redrawn "viewport window". .wave-viewport is a plain (non-scrolling)
+     wrapper that .wave-scroll-area sits inside, and canvas/playhead attach
+     to it instead - geometrically identical box, but scroll-immune. */
+  .wave-viewport{position:relative;}
+  .wave-scroll-area{
+    position:relative;overflow-x:auto;overflow-y:hidden;
+    height:84px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);
+  }
+  .wave-scroll-inner{position:relative;height:40px;min-width:100%;}
+  .wave-track-row{position:absolute;inset:0;}
+  .wave-block{
+    position:absolute;top:2px;height:36px;border-radius:4px;
+    background:rgba(51,214,192,.18);border:1px solid var(--accent-dim);
+    overflow:hidden;font-size:10px;color:var(--text);white-space:nowrap;
+    padding:2px 5px;line-height:1.3;cursor:default;
+  }
+  .wave-block.current{background:rgba(51,214,192,.34);border-color:var(--accent);}
+  .wave-block.open-ended{border-right-style:dashed;}
+  .wave-block.selected{box-shadow:0 0 0 2px var(--accent) inset;}
+  .wave-block.selected.current{background:rgba(51,214,192,.44);}
+  .wave-handle{
+    position:absolute;top:0;bottom:0;width:9px;cursor:ew-resize;touch-action:none;z-index:2;
+  }
+  .wave-handle.start{left:-4px;}
+  .wave-handle.end{right:-4px;}
+  .wave-handle:hover{background:rgba(51,214,192,.4);}
+  .wave-canvas{position:absolute;top:44px;left:0;height:36px;pointer-events:none;}
+  .wave-playhead{
+    position:absolute;top:0;bottom:0;width:1px;background:var(--danger);
+    pointer-events:none;z-index:3;transform:translateX(-9999px);
+  }
 
   .empty-state{padding:40px 20px;text-align:center;color:var(--muted2);font-size:13px;line-height:1.8;}
 
@@ -1233,8 +1290,56 @@
         <button class="ghost-btn small" id="addLineBtn">＋ 行を追加</button>
         <button class="ghost-btn small" id="autoTimeBtn">曲を解析してタイミングを自動セット</button>
         <button class="ghost-btn small" id="bulkSyncBtn" disabled>選択行: 終了時間を次行の開始時間にセット</button>
+        <span class="bulk-shift-group">
+          <input type="text" class="time-input" id="bulkShiftInput" placeholder="±秒" title="正の値で後ろに、負の値で前にずらす秒数（例: -1.5, 2）">
+          <button class="ghost-btn small" id="bulkShiftBtn" disabled>選択行: まとめて時間をシフト</button>
+          <span class="bulk-shift-steppers" id="bulkShiftSteppers">
+            <button class="ghost-btn small bulk-shift-step-btn" id="bulkShiftMinus1" disabled title="選択行をまとめて-1秒シフト">−1秒</button>
+            <button class="ghost-btn small bulk-shift-step-btn" id="bulkShiftMinus01" disabled title="選択行をまとめて-0.1秒シフト">−0.1秒</button>
+            <button class="ghost-btn small bulk-shift-step-btn" id="bulkShiftPlus01" disabled title="選択行をまとめて+0.1秒シフト">+0.1秒</button>
+            <button class="ghost-btn small bulk-shift-step-btn" id="bulkShiftPlus1" disabled title="選択行をまとめて+1秒シフト">+1秒</button>
+          </span>
+        </span>
         <button class="ghost-btn small" id="textEditToggleBtn">テキストで編集</button>
         <span class="hint" id="selectedCountHint"></span>
+      </div>
+
+      <div class="wave-timeline" id="waveTimeline">
+        <div class="wave-timeline-head">
+          <div class="wave-head-left">
+            <div class="wave-transport-group" id="waveTransportGroup">
+              <button class="rowbtn" id="waveBackBtn" title="5秒戻る">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M2.5 12a9.5 9.5 0 1 1 3 6.9"/><path d="M2.5 6v6h6"/></svg>
+              </button>
+              <button class="rowbtn playrow" id="wavePlayBtn" title="再生 / 一時停止">
+                <svg id="wavePlayIcon" viewBox="0 0 24 24" fill="currentColor" width="13" height="13"><path d="M8 5v14l11-7z"/></svg>
+              </button>
+              <button class="rowbtn" id="waveFwdBtn" title="5秒進む">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M21.5 12a9.5 9.5 0 1 0-3 6.9"/><path d="M21.5 6v6h-6"/></svg>
+              </button>
+            </div>
+            <span class="hint" id="waveTimelineHint">音源を読み込むと波形が表示されます</span>
+          </div>
+          <div class="wave-zoom-controls">
+            <div class="wave-zoom-group" id="waveZoomGroup">
+              <span class="wave-vzoom-label">横</span>
+              <input type="range" id="waveZoomSlider" min="10" max="200" step="1" value="40" title="波形の横方向（時間軸）の拡大縮小">
+            </div>
+            <div class="wave-vzoom-group" id="waveVZoomGroup">
+              <span class="wave-vzoom-label">縦</span>
+              <input type="range" id="waveVZoomSlider" min="0.5" max="4" step="0.1" value="1" title="波形の縦方向（振幅）の拡大縮小">
+            </div>
+          </div>
+        </div>
+        <div class="wave-viewport" id="waveViewport">
+          <div class="wave-scroll-area" id="waveScrollArea">
+            <div class="wave-scroll-inner" id="waveScrollInner">
+              <div class="wave-track-row" id="waveTrackRow"></div>
+            </div>
+          </div>
+          <canvas class="wave-canvas" id="waveCanvas"></canvas>
+          <div class="wave-playhead" id="wavePlayhead"></div>
+        </div>
       </div>
 
       <div class="lyrics-wrap" id="lyricsWrap">
@@ -6845,7 +6950,28 @@ export function createThreeParticleBurst(){
   const selectAllCheckbox = document.getElementById('selectAllCheckbox');
   const autoTimeBtn = document.getElementById('autoTimeBtn');
   const bulkSyncBtn = document.getElementById('bulkSyncBtn');
+  const bulkShiftInput = document.getElementById('bulkShiftInput');
+  const bulkShiftBtn = document.getElementById('bulkShiftBtn');
+  const bulkShiftMinus1 = document.getElementById('bulkShiftMinus1');
+  const bulkShiftMinus01 = document.getElementById('bulkShiftMinus01');
+  const bulkShiftPlus01 = document.getElementById('bulkShiftPlus01');
+  const bulkShiftPlus1 = document.getElementById('bulkShiftPlus1');
   const textEditToggleBtn = document.getElementById('textEditToggleBtn');
+
+  const waveTimeline = document.getElementById('waveTimeline');
+  const waveTimelineHint = document.getElementById('waveTimelineHint');
+  const waveBackBtn = document.getElementById('waveBackBtn');
+  const wavePlayBtn = document.getElementById('wavePlayBtn');
+  const wavePlayIcon = document.getElementById('wavePlayIcon');
+  const waveFwdBtn = document.getElementById('waveFwdBtn');
+  const waveZoomSlider = document.getElementById('waveZoomSlider');
+  const waveVZoomSlider = document.getElementById('waveVZoomSlider');
+  const waveScrollArea = document.getElementById('waveScrollArea');
+  const waveScrollInner = document.getElementById('waveScrollInner');
+  const waveTrackRow = document.getElementById('waveTrackRow');
+  const waveCanvas = document.getElementById('waveCanvas');
+  const wavePlayhead = document.getElementById('wavePlayhead');
+
   const lyricsWrap = document.getElementById('lyricsWrap');
   const lyricsTextEditor = document.getElementById('lyricsTextEditor');
   const lyricsTextArea = document.getElementById('lyricsTextArea');
@@ -10452,6 +10578,8 @@ export function createThreeParticleBurst(){
     audioEl.load();
     audioFileName.textContent = file.name;
     setStatus('音源を読み込みました: ' + file.name + '（再生ボタンでプレビューできます）', 'ok');
+    resetWaveformPeaks();
+    ensureWaveformPeaks();
   });
 
   audioEl.addEventListener('loadedmetadata', function(){
@@ -10464,20 +10592,30 @@ export function createThreeParticleBurst(){
     if(!isScrubbing) seek.value = audioEl.currentTime;
     updateTimeDisplay();
     updatePreviewHighlight();
+    updateWavePlayhead();
   });
 
+  // The wave-view mini transport (wavePlayIcon) mirrors the main playBtn's
+  // icon, so both are driven from the same audioEl play/pause events rather
+  // than duplicating icon-swap logic per button.
+  const PLAY_ICON_PATH = '<path d="M8 5v14l11-7z"/>';
+  const PAUSE_ICON_PATH = '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>';
   audioEl.addEventListener('play', function(){
-    playIcon.innerHTML = '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>';
+    playIcon.innerHTML = PAUSE_ICON_PATH;
+    wavePlayIcon.innerHTML = PAUSE_ICON_PATH;
   });
   audioEl.addEventListener('pause', function(){
-    playIcon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+    playIcon.innerHTML = PLAY_ICON_PATH;
+    wavePlayIcon.innerHTML = PLAY_ICON_PATH;
   });
 
   function updateTimeDisplay(){
     timeDisplay.textContent = fmtClock(audioEl.currentTime) + ' / ' + fmtClock(audioEl.duration || 0);
   }
 
-  playBtn.addEventListener('click', function(){
+  // Shared by the main transport's playBtn and the wave view's compact
+  // wavePlayBtn, so there is one play/pause toggle implementation.
+  function togglePlay(){
     if(!audioEl.src){ setStatus('先に音源ファイルを開いてください', 'err'); return; }
     if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
     if(audioEl.paused){
@@ -10490,7 +10628,9 @@ export function createThreeParticleBurst(){
     } else {
       audioEl.pause();
     }
-  });
+  }
+  playBtn.addEventListener('click', togglePlay);
+  wavePlayBtn.addEventListener('click', togglePlay);
 
   let isScrubbing = false;
   seek.addEventListener('input', function(){
@@ -10520,6 +10660,8 @@ export function createThreeParticleBurst(){
 
   back5.addEventListener('click', function(){ nudge(-5); });
   fwd5.addEventListener('click', function(){ nudge(5); });
+  waveBackBtn.addEventListener('click', function(){ nudge(-5); });
+  waveFwdBtn.addEventListener('click', function(){ nudge(5); });
   function nudge(delta){
     if(!audioEl.src) return;
     audioEl.currentTime = Math.min(Math.max(0, audioEl.currentTime + delta), audioEl.duration || 1e9);
@@ -10902,6 +11044,7 @@ export function createThreeParticleBurst(){
     updateBulkToolbar();
     renderPreviewAll();
     updatePreviewHighlight();
+    renderTimelineTrack();
   }
 
   /* ===================== End-time sync (to next line's start) ===================== */
@@ -10931,7 +11074,14 @@ export function createThreeParticleBurst(){
     const ids = lyricsLines.filter(l => !l.isMeta && !l.isBlank).map(l => l.id);
     const selectedCount = ids.filter(id => selectedIds.has(id)).length;
     bulkSyncBtn.disabled = selectedCount === 0;
+    bulkShiftBtn.disabled = selectedCount === 0;
+    bulkShiftInput.disabled = selectedCount === 0;
+    bulkShiftMinus1.disabled = selectedCount === 0;
+    bulkShiftMinus01.disabled = selectedCount === 0;
+    bulkShiftPlus01.disabled = selectedCount === 0;
+    bulkShiftPlus1.disabled = selectedCount === 0;
     selectedCountHint.textContent = selectedCount > 0 ? selectedCount + '行選択中' : '';
+    refreshWaveSelectionHighlight();
     if(ids.length === 0){
       selectAllCheckbox.checked = false;
       selectAllCheckbox.indeterminate = false;
@@ -10967,7 +11117,73 @@ export function createThreeParticleBurst(){
     }
   });
 
+  // Bulk-shifts every selected line's start/end by the same delta - added
+  // for the case where auto-timing mistook an intro for the vocal start and
+  // shifted the whole track early/late, so the fix is a uniform nudge rather
+  // than per-line edits. Reuses the table's existing checkbox selection
+  // (selectedIds) rather than adding a separate selection UI in the wave view.
+  // Shared by the free-form numeric input+button and the fixed ±1s/±0.1s
+  // stepper buttons below, so there is one shift implementation.
+  function applyBulkShift(delta){
+    let shiftedCount = 0;
+    lyricsLines.forEach(function(line){
+      if(!selectedIds.has(line.id)) return;
+      if(line.start !== null) line.start = Math.max(0, Math.round((line.start + delta) * 1000) / 1000);
+      if(line.end !== null) line.end = Math.max(0, Math.round((line.end + delta) * 1000) / 1000);
+      shiftedCount++;
+    });
+    if(shiftedCount === 0){
+      setStatus('シフト対象の行がありません', 'err');
+      return;
+    }
+    renderTable();
+    updateSaveEnabled();
+    scheduleSaveSession();
+    setStatus(shiftedCount + '行を' + (delta > 0 ? '+' : '') + delta + '秒シフトしました', 'ok');
+  }
+
+  bulkShiftBtn.addEventListener('click', function(){
+    const raw = bulkShiftInput.value.trim();
+    const delta = parseFloat(raw);
+    if(raw === '' || !isFinite(delta) || delta === 0){
+      setStatus('シフトする秒数を入力してください（例: -1.5, 2）', 'err');
+      return;
+    }
+    applyBulkShift(delta);
+  });
+
+  bulkShiftMinus1.addEventListener('click', function(){ applyBulkShift(-1); });
+  bulkShiftMinus01.addEventListener('click', function(){ applyBulkShift(-0.1); });
+  bulkShiftPlus01.addEventListener('click', function(){ applyBulkShift(0.1); });
+  bulkShiftPlus1.addEventListener('click', function(){ applyBulkShift(1); });
+
   const TIME_STEP_SEC = 0.1;
+
+  // Data-only commit shared by the table's numeric time input and the
+  // waveform drag handles, so both editing paths funnel through one place
+  // instead of maintaining two copies of the save/dirty-state bookkeeping.
+  function commitLineTime(line, field, sec){
+    line[field] = sec;
+    updateSaveEnabled();
+    scheduleSaveSession();
+  }
+
+  // Patches the table row's own time input/play-button to match `line[field]`
+  // after an edit made elsewhere (i.e. a waveform drag) - looked up by row
+  // index rather than via a closure, since the drag handler has no direct
+  // reference to this row's DOM.
+  function refreshTimeInputDom(line, field){
+    const i = lyricsLines.indexOf(line);
+    if(i === -1) return;
+    const tr = tbody.querySelector('tr[data-idx="' + i + '"]');
+    if(!tr) return;
+    const input = tr.querySelector('td.time.' + field + ' input.time-input');
+    if(input){ input.value = secToSrt(line[field]); input.classList.remove('invalid'); }
+    if(field === 'start'){
+      const playBtn = tr.querySelector('.playrow');
+      if(playBtn) playBtn.disabled = line.start === null;
+    }
+  }
 
   function makeTimeInput(line, field){
     const disabled = line.isMeta || line.isBlank;
@@ -10982,7 +11198,7 @@ export function createThreeParticleBurst(){
     if(disabled) input.disabled = true;
 
     function commit(sec){
-      line[field] = sec;
+      commitLineTime(line, field, sec);
       input.value = secToSrt(sec);
       input.classList.remove('invalid');
       if(field === 'start'){
@@ -10990,8 +11206,7 @@ export function createThreeParticleBurst(){
         const playBtn = tr && tr.querySelector('.playrow');
         if(playBtn) playBtn.disabled = line.start === null;
       }
-      updateSaveEnabled();
-      scheduleSaveSession();
+      refreshWaveBlock(line);
     }
 
     function step(delta){
@@ -11001,7 +11216,7 @@ export function createThreeParticleBurst(){
 
     input.addEventListener('change', function(){
       const val = input.value.trim();
-      if(val === ''){ line[field] = null; input.classList.remove('invalid'); updateSaveEnabled(); return; }
+      if(val === ''){ line[field] = null; input.classList.remove('invalid'); updateSaveEnabled(); refreshWaveBlock(line); return; }
       const sec = srtToSec(val);
       if(sec === null){ input.classList.add('invalid'); return; }
       commit(sec);
@@ -11060,6 +11275,343 @@ export function createThreeParticleBurst(){
     }
 
     return wrap;
+  }
+
+  /* ===================== Waveform + lyric timeline (C-1) ===================== */
+  // Two rows sharing one time->px axis: a track of draggable lyric-line
+  // blocks (#waveTrackRow, plain DOM, natively scrolled) and a static
+  // amplitude waveform (#waveCanvas). The canvas is kept viewport-sized and
+  // redrawn from precomputed peak buckets on scroll, rather than sized to
+  // duration*pxPerSec, so long tracks at high zoom never require an
+  // oversized canvas or a full repaint per scroll frame.
+  const WAVE_ZOOM_KEY = 'srt-maker-wave-zoom';
+  const WAVE_ZOOM_MIN = 10, WAVE_ZOOM_MAX = 200;
+  const WAVE_BUCKET_SAMPLES = 128;
+  const WAVE_VZOOM_KEY = 'srt-maker-wave-vzoom';
+  const WAVE_VZOOM_MIN = 0.5, WAVE_VZOOM_MAX = 4;
+  const WAVE_VZOOM_BASE_SCALE = 16; // px per unit amplitude at vzoom=1
+
+  // Zoom (horizontal px/sec, like vertical amplitude scale below) only
+  // changes the draw-time/layout mapping - peak buckets are computed once,
+  // independent of zoom - so both are continuous sliders at the same cost
+  // a discrete button set would have been.
+  function loadWaveZoom(){
+    try {
+      const v = parseFloat(localStorage.getItem(WAVE_ZOOM_KEY));
+      if(isFinite(v) && v >= WAVE_ZOOM_MIN && v <= WAVE_ZOOM_MAX) return v;
+    } catch(e){}
+    return 40;
+  }
+  function saveWaveZoom(){
+    try { localStorage.setItem(WAVE_ZOOM_KEY, String(waveZoomPxPerSec)); } catch(e){}
+  }
+
+  function loadWaveVZoom(){
+    try {
+      const v = parseFloat(localStorage.getItem(WAVE_VZOOM_KEY));
+      if(isFinite(v) && v >= WAVE_VZOOM_MIN && v <= WAVE_VZOOM_MAX) return v;
+    } catch(e){}
+    return 1;
+  }
+  function saveWaveVZoom(){
+    try { localStorage.setItem(WAVE_VZOOM_KEY, String(waveVZoom)); } catch(e){}
+  }
+
+  let waveZoomPxPerSec = loadWaveZoom();
+  let waveVZoom = loadWaveVZoom();
+  let waveformPeaks = null;       // { min: Float32Array, max: Float32Array, bucketSec, duration } | null
+  let waveformPeaksForFile = null;
+
+  function setWaveTimelineHint(msg){
+    waveTimelineHint.textContent = msg || (currentAudioFile ? '' : '音源を読み込むと波形が表示されます');
+  }
+
+  function waveformDurationSec(){
+    if(waveformPeaks && waveformPeaks.duration) return waveformPeaks.duration;
+    if(audioEl.duration && isFinite(audioEl.duration)) return audioEl.duration;
+    return 0;
+  }
+
+  function mixToMono(buffer){
+    const len = buffer.length;
+    const chans = buffer.numberOfChannels;
+    if(chans === 1) return buffer.getChannelData(0);
+    const out = new Float32Array(len);
+    for(let c = 0; c < chans; c++){
+      const data = buffer.getChannelData(c);
+      for(let i = 0; i < len; i++) out[i] += data[i] / chans;
+    }
+    return out;
+  }
+
+  function computePeakBuckets(buffer, samplesPerBucket){
+    const data = mixToMono(buffer);
+    const total = data.length;
+    const bucketCount = Math.max(1, Math.ceil(total / samplesPerBucket));
+    const min = new Float32Array(bucketCount);
+    const max = new Float32Array(bucketCount);
+    for(let b = 0; b < bucketCount; b++){
+      const start = b * samplesPerBucket;
+      const end = Math.min(total, start + samplesPerBucket);
+      let mn = 0, mx = 0;
+      for(let i = start; i < end; i++){
+        const v = data[i];
+        if(v < mn) mn = v;
+        if(v > mx) mx = v;
+      }
+      min[b] = mn; max[b] = mx;
+    }
+    return { min: min, max: max, bucketSec: samplesPerBucket / buffer.sampleRate, duration: buffer.duration };
+  }
+
+  // Decodes+caches peaks for the current file. Safe to call repeatedly -
+  // no-ops if already computed for `currentAudioFile`. Not shared with
+  // autoTimeBtn's own decode (9607+) - that pipeline is left untouched;
+  // deduping the two decode paths is deferred to C-2, which already plans
+  // to revisit the auto-timing pipeline.
+  function ensureWaveformPeaks(){
+    if(!currentAudioFile) return Promise.resolve(null);
+    if(waveformPeaksForFile === currentAudioFile && waveformPeaks) return Promise.resolve(waveformPeaks);
+    ensureAudioGraph();
+    if(!audioCtx) return Promise.resolve(null);
+    const targetFile = currentAudioFile;
+    setWaveTimelineHint('波形を解析中…');
+    return targetFile.arrayBuffer()
+      .then(function(ab){ return audioCtx.decodeAudioData(ab); })
+      .then(function(buffer){
+        if(currentAudioFile !== targetFile) return null; // file changed while decoding
+        waveformPeaks = computePeakBuckets(buffer, WAVE_BUCKET_SAMPLES);
+        waveformPeaksForFile = targetFile;
+        setWaveTimelineHint('');
+        renderTimelineTrack();
+        resizeWaveCanvas();
+        return waveformPeaks;
+      })
+      .catch(function(err){
+        setWaveTimelineHint('波形の解析に失敗しました');
+        console.warn(err);
+        return null;
+      });
+  }
+
+  // Clears the decoded waveform image only - the block track keeps showing
+  // lyric line timings (if any) regardless of whether audio is loaded,
+  // matching the existing table's behavior.
+  function resetWaveformPeaks(){
+    waveformPeaks = null;
+    waveformPeaksForFile = null;
+    setWaveTimelineHint('');
+    resizeWaveCanvas();
+  }
+
+  function waveBlockGeometry(line){
+    const start = line.start === null ? 0 : line.start;
+    const end = line.end === null ? start + 2 : line.end;
+    return { left: start * waveZoomPxPerSec, width: Math.max(4, (end - start) * waveZoomPxPerSec) };
+  }
+
+  // Patches one block in place - used by both the drag handler (which only
+  // ever touches an already-rendered block) and the numeric time input's
+  // commit (which may be touching a line with no block yet, or clearing one
+  // to nothing). Deliberately avoids a full renderTimelineTrack() rebuild
+  // in the common case: rebuilding destroys and recreates every block/handle
+  // element, which would abort an in-progress drag on some *other* block if
+  // triggered by, say, a blur-triggered 'change' firing on a still-focused
+  // numeric input the instant the user presses down on a waveform handle.
+  function refreshWaveBlock(line){
+    const el = waveTrackRow.querySelector('[data-line-id="' + line.id + '"]');
+    if(line.isMeta || line.isBlank || line.start === null){
+      if(el) el.remove();
+      return;
+    }
+    if(!el){ renderTimelineTrack(); return; }
+    const g = waveBlockGeometry(line);
+    el.style.left = g.left + 'px';
+    el.style.width = g.width + 'px';
+    el.classList.toggle('open-ended', line.end === null);
+  }
+
+  // Repositions every existing block in place for a horizontal-zoom change,
+  // instead of renderTimelineTrack()'s destroy-and-recreate rebuild. The
+  // zoom slider fires 'input' continuously while dragged, and rebuilding
+  // every block (and reattaching their drag-handle listeners) on each tick
+  // would be wasteful and - per the same lesson as refreshWaveBlock() above -
+  // risks yanking the DOM out from under an unrelated in-progress drag.
+  function repositionAllWaveBlocks(){
+    waveTrackRow.querySelectorAll('.wave-block').forEach(function(el){
+      const line = lyricsLines.find(function(l){ return l.id === Number(el.dataset.lineId); });
+      if(!line) return;
+      const g = waveBlockGeometry(line);
+      el.style.left = g.left + 'px';
+      el.style.width = g.width + 'px';
+    });
+    const durationSec = waveformDurationSec();
+    const minWidth = waveScrollArea.clientWidth || 0;
+    waveScrollInner.style.width = Math.max(minWidth, durationSec * waveZoomPxPerSec) + 'px';
+    redrawWaveCanvas();
+  }
+
+  function attachHandleDrag(handleEl, line, field, blockEl){
+    let dragging = false;
+    handleEl.addEventListener('pointerdown', function(ev){
+      dragging = true;
+      handleEl.setPointerCapture(ev.pointerId);
+      ev.stopPropagation();
+    });
+    handleEl.addEventListener('pointermove', function(ev){
+      if(!dragging) return;
+      const rect = waveScrollArea.getBoundingClientRect();
+      const x = ev.clientX - rect.left + waveScrollArea.scrollLeft;
+      const dur = waveformDurationSec();
+      const rawSec = x / waveZoomPxPerSec;
+      const sec = clamp(Math.round(rawSec * 10) / 10, 0, dur > 0 ? dur : rawSec);
+      commitLineTime(line, field, sec);
+      refreshWaveBlock(line);
+      refreshTimeInputDom(line, field);
+    });
+    ['pointerup', 'pointercancel'].forEach(function(evName){
+      handleEl.addEventListener(evName, function(){ dragging = false; });
+    });
+  }
+
+  // Full rebuild of the block track - called from renderTable() for every
+  // structural change (add/remove line, load lyrics/SRT, project switch),
+  // matching the "renderTable() is the single place structural changes fan
+  // out from" convention already used for the table itself. Per-drag-frame
+  // updates never go through this - see refreshWaveBlock().
+  function renderTimelineTrack(){
+    waveTrackRow.innerHTML = '';
+    const durationSec = waveformDurationSec();
+    const minWidth = waveScrollArea.clientWidth || 0;
+    waveScrollInner.style.width = Math.max(minWidth, durationSec * waveZoomPxPerSec) + 'px';
+
+    lyricsLines.forEach(function(line, i){
+      if(line.isMeta || line.isBlank || line.start === null) return;
+      const block = document.createElement('div');
+      block.className = 'wave-block';
+      block.dataset.lineId = line.id;
+      if(i === currentIndex) block.classList.add('current');
+      if(line.end === null) block.classList.add('open-ended');
+      if(selectedIds.has(line.id)) block.classList.add('selected');
+      const g = waveBlockGeometry(line);
+      block.style.left = g.left + 'px';
+      block.style.width = g.width + 'px';
+      block.textContent = line.text;
+      block.title = line.text;
+
+      const startHandle = document.createElement('div');
+      startHandle.className = 'wave-handle start';
+      const endHandle = document.createElement('div');
+      endHandle.className = 'wave-handle end';
+      block.appendChild(startHandle);
+      block.appendChild(endHandle);
+      attachHandleDrag(startHandle, line, 'start', block);
+      attachHandleDrag(endHandle, line, 'end', block);
+
+      waveTrackRow.appendChild(block);
+    });
+
+    redrawWaveCanvas();
+  }
+
+  // Cheap class-only sync of the wave blocks' selected state with
+  // `selectedIds` - called from updateBulkToolbar() (itself called whenever
+  // selection changes, via the row checkboxes or "select all") so it never
+  // needs a full renderTimelineTrack() rebuild just to reflect a selection.
+  function refreshWaveSelectionHighlight(){
+    waveTrackRow.querySelectorAll('.wave-block').forEach(function(el){
+      el.classList.toggle('selected', selectedIds.has(Number(el.dataset.lineId)));
+    });
+  }
+
+  // Click/tap on empty waveform background seeks, mirroring #seek - handles
+  // and blocks own their own pointer events and stop propagation before
+  // this ever fires.
+  waveScrollArea.addEventListener('pointerdown', function(ev){
+    if(ev.target.closest('.wave-handle, .wave-block')) return;
+    if(!audioEl.src) return;
+    const rect = waveScrollArea.getBoundingClientRect();
+    const x = ev.clientX - rect.left + waveScrollArea.scrollLeft;
+    const dur = waveformDurationSec();
+    audioEl.currentTime = clamp(x / waveZoomPxPerSec, 0, dur > 0 ? dur : x / waveZoomPxPerSec);
+    updateWavePlayhead();
+  });
+
+  function resizeWaveCanvas(){
+    const rect = waveScrollArea.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(rect.width * dpr));
+    const h = Math.max(1, Math.round(36 * dpr));
+    if(waveCanvas.width !== w) waveCanvas.width = w;
+    if(waveCanvas.height !== h) waveCanvas.height = h;
+    waveCanvas.style.width = rect.width + 'px';
+    const ctx = waveCanvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    redrawWaveCanvas();
+  }
+
+  function redrawWaveCanvas(){
+    const ctx = waveCanvas.getContext('2d');
+    const widthCss = waveScrollArea.clientWidth || 0;
+    ctx.clearRect(0, 0, widthCss, 36);
+    if(!waveformPeaks || !widthCss) return;
+
+    const scrollLeft = waveScrollArea.scrollLeft;
+    const secPerPx = 1 / waveZoomPxPerSec;
+    const bucketsPerSec = 1 / waveformPeaks.bucketSec;
+    const bucketCount = waveformPeaks.min.length;
+    const midY = 18, scaleY = WAVE_VZOOM_BASE_SCALE * waveVZoom;
+    ctx.strokeStyle = 'rgba(51,214,192,.85)';
+    ctx.lineWidth = 1;
+    for(let px = 0; px < widthCss; px++){
+      const t0 = (scrollLeft + px) * secPerPx;
+      const t1 = (scrollLeft + px + 1) * secPerPx;
+      const b0 = Math.max(0, Math.floor(t0 * bucketsPerSec));
+      const b1 = Math.min(bucketCount - 1, Math.ceil(t1 * bucketsPerSec));
+      if(b0 >= bucketCount || b0 > b1) continue;
+      let mn = 0, mx = 0;
+      for(let b = b0; b <= b1; b++){
+        if(waveformPeaks.min[b] < mn) mn = waveformPeaks.min[b];
+        if(waveformPeaks.max[b] > mx) mx = waveformPeaks.max[b];
+      }
+      ctx.beginPath();
+      ctx.moveTo(px + 0.5, midY - mx * scaleY);
+      ctx.lineTo(px + 0.5, midY - mn * scaleY);
+      ctx.stroke();
+    }
+  }
+
+  function updateWavePlayhead(){
+    const x = audioEl.currentTime * waveZoomPxPerSec - waveScrollArea.scrollLeft;
+    wavePlayhead.style.transform = 'translateX(' + x + 'px)';
+  }
+
+  let waveScrollRAF = null;
+  waveScrollArea.addEventListener('scroll', function(){
+    if(waveScrollRAF) return;
+    waveScrollRAF = requestAnimationFrame(function(){
+      waveScrollRAF = null;
+      redrawWaveCanvas();
+      updateWavePlayhead();
+    });
+  });
+
+  waveZoomSlider.value = String(waveZoomPxPerSec);
+  waveZoomSlider.addEventListener('input', function(){
+    waveZoomPxPerSec = parseFloat(waveZoomSlider.value);
+    repositionAllWaveBlocks();
+  });
+  waveZoomSlider.addEventListener('change', function(){ saveWaveZoom(); });
+
+  waveVZoomSlider.value = String(waveVZoom);
+  waveVZoomSlider.addEventListener('input', function(){
+    waveVZoom = parseFloat(waveVZoomSlider.value);
+    redrawWaveCanvas();
+  });
+  waveVZoomSlider.addEventListener('change', function(){ saveWaveVZoom(); });
+
+  if(window.ResizeObserver){
+    new ResizeObserver(function(){ resizeWaveCanvas(); }).observe(waveScrollArea);
   }
 
   /* ===================== Lyrics preview ===================== */
@@ -11675,6 +12227,7 @@ export function createThreeParticleBurst(){
     seek.max = 0;
     seek.disabled = true;
     updateTimeDisplay();
+    resetWaveformPeaks();
   }
 
   // Loads a project record into the live app state - used both for the
@@ -11700,6 +12253,7 @@ export function createThreeParticleBurst(){
       audioEl.src = url;
       audioEl.load();
       audioFileName.textContent = record.audioFileName || '未選択';
+      ensureWaveformPeaks();
     }
 
     clearPreviewBgState();
