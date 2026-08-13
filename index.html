@@ -5739,27 +5739,28 @@ export function createThreeWaveGrid(){
   scene.fog = new THREE.FogExp2(0x05070a, 0.05);
   const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.65);
-  scene.add(ambient);
-  const light1 = new THREE.PointLight(0x7fe9db, 3, 40);
-  light1.position.set(5, 8, 6);
-  scene.add(light1);
-  const light2 = new THREE.PointLight(0x33d6c0, 2, 40);
-  light2.position.set(-6, 5, -4);
-  scene.add(light2);
+  // No scene lights: colored PointLights tinted to colorStart/colorEnd used
+  // to stand in for a "glow", but under lit shading they dominated the
+  // actual per-cube gradient - colorEnd only ever showed up as a light tint,
+  // never on the cubes themselves. Same root cause and same fix as
+  // createThreeGridBox(): unlit MeshBasicMaterial with directly-set colors.
 
   const COUNT = COLS * ROWS;
   const cubeGeo = new THREE.BoxGeometry(CELL * 0.72, 1, CELL * 0.72);
-  const cubeMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff, metalness: 0.3, roughness: 0.45,
-    emissive: 0x184a44, emissiveIntensity: 0.75
-  });
-  const mesh = new THREE.InstancedMesh(cubeGeo, cubeMat, COUNT);
-  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  scene.add(mesh);
+  // Individual Mesh + MeshBasicMaterial per cube, not a shared InstancedMesh
+  // with setColorAt() - see createThreeGridBox()'s historyMeshes comment for
+  // why (an InstancedMesh-per-instance-color compatibility gap on some real
+  // GPU/driver combinations silently renders solid black there, even though
+  // it renders fine in this session's own headless-Chromium testing).
+  const cubeMeshes = new Array(COUNT);
+  for(let i = 0; i < COUNT; i++){
+    const m = new THREE.Mesh(cubeGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    scene.add(m);
+    cubeMeshes[i] = m;
+  }
 
   const baseGeo = new THREE.PlaneGeometry(COLS * CELL + 1.4, ROWS * CELL + 1.4);
-  const baseMat = new THREE.MeshStandardMaterial({ color: 0x090b0f, metalness: 0.15, roughness: 0.9 });
+  const baseMat = new THREE.MeshBasicMaterial({ color: 0x090b0f });
   const base = new THREE.Mesh(baseGeo, baseMat);
   base.rotation.x = -Math.PI / 2;
   base.position.y = -0.02;
@@ -5793,14 +5794,6 @@ export function createThreeWaveGrid(){
   function applyColors(colorStartHex, colorEndHex){
     lastColorStart = colorStartHex; lastColorEnd = colorEndHex;
     tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
-    light1.color.copy(tmpColorA);
-    light2.color.copy(tmpColorB);
-    // The material's own emissive base color was a fixed, unrelated teal
-    // that never changed with the selected color pattern - for cubes with
-    // little direct diffuse light hitting them (short/quiet ones) that
-    // fixed tint dominated over whatever pattern was actually picked, which
-    // is why switching color patterns barely seemed to do anything.
-    cubeMat.emissive.copy(tmpColorA).multiplyScalar(0.35);
   }
 
   function update(values, eqStyle, w, h){
@@ -5826,8 +5819,6 @@ export function createThreeWaveGrid(){
     const contrast = eqStyle.threeContrast || 1;
     const thickness = eqStyle.threeThickness || 1;
     const colorByAmplitude = eqStyle.threeColorMode === 'amplitude';
-    ambient.intensity = 0.65 / Math.max(0.5, contrast);
-    let frontSum = 0;
     for(let r = 0; r < ROWS; r++){
       const row = history[r];
       const z = zOf(r);
@@ -5836,26 +5827,21 @@ export function createThreeWaveGrid(){
       for(let c = 0; c < COLS; c++){
         const idx = r * COLS + c;
         const v = row[c];
-        if(r === 0) frontSum += v;
         const targetH = MIN_H + v * reactivity * MAX_H;
         heights[idx] += (targetH - heights[idx]) * smoothing;
         const hgt = Math.max(MIN_H, heights[idx]);
 
-        dummy.position.set(xOf(c), hgt / 2, z);
-        dummy.scale.set(thickness, hgt, thickness);
-        dummy.updateMatrix();
-        mesh.setMatrixAt(idx, dummy.matrix);
+        const m = cubeMeshes[idx];
+        m.position.set(xOf(c), hgt / 2, z);
+        m.scale.set(thickness, hgt, thickness);
 
         const t = colorByAmplitude ? v : c / (COLS - 1 || 1);
         cellColor.copy(tmpColorA).lerp(tmpColorB, t);
         cellColor.lerp(WHITE, Math.min(0.55, v * 0.5) / contrast);
         cellColor.multiplyScalar(fade);
-        mesh.setColorAt(idx, cellColor);
+        m.material.color.copy(cellColor);
       }
     }
-    mesh.instanceMatrix.needsUpdate = true;
-    if(mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    cubeMat.emissiveIntensity = (0.4 + (frontSum / COLS) * 1.3) * contrast;
 
     const elapsed = (now - startTime) / 1000;
     // Slow continuous 360-degree orbit around the grid's center (a full
@@ -5873,7 +5859,7 @@ export function createThreeWaveGrid(){
 
   function dispose(){
     cubeGeo.dispose();
-    cubeMat.dispose();
+    cubeMeshes.forEach(function(m){ m.material.dispose(); });
     baseGeo.dispose();
     baseMat.dispose();
     renderer.dispose();
@@ -5999,14 +5985,10 @@ export function createThreeSpikeOrb(){
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 100);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.55);
-  scene.add(ambient);
-  const light1 = new THREE.PointLight(0xffffff, 3.4, 40);
-  light1.position.set(5, 6, 7);
-  scene.add(light1);
-  const light2 = new THREE.PointLight(0x7fe9db, 2.4, 40);
-  light2.position.set(-6, -3, -5);
-  scene.add(light2);
+  // No scene lights - same fix as createThreeGridBox()/createThreeWaveGrid():
+  // colored PointLights tinted to colorStart/colorEnd only ever showed up as
+  // a light tint (a "glow"), while the lit MeshStandardMaterial washed out
+  // the actual per-vertex colorStart->colorEnd gradient underneath it.
 
   const geo = new THREE.IcosahedronGeometry(RADIUS, DETAIL);
   const posAttr = geo.attributes.position;
@@ -6022,10 +6004,9 @@ export function createThreeSpikeOrb(){
   }
   geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(vertexCount * 3), 3));
 
-  const mat = new THREE.MeshStandardMaterial({
+  const mat = new THREE.MeshBasicMaterial({
     color: 0xffffff, wireframe: true, transparent: true, opacity: 0.95,
-    vertexColors: true, metalness: 0.1, roughness: 0.35,
-    emissive: 0x1c3a38, emissiveIntensity: 0.5
+    vertexColors: true
   });
   const wireMesh = new THREE.Mesh(geo, mat);
   scene.add(wireMesh);
@@ -6057,11 +6038,6 @@ export function createThreeSpikeOrb(){
   function applyColors(colorStartHex, colorEndHex){
     lastColorStart = colorStartHex; lastColorEnd = colorEndHex;
     tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
-    light2.color.copy(tmpColorB);
-    // Same fix as the other styles: the wireframe's emissive base was a
-    // fixed, unrelated teal that overpowered whatever color pattern was
-    // actually selected.
-    mat.emissive.copy(tmpColorA).multiplyScalar(0.4);
   }
 
   function update(values, eqStyle, w, h){
@@ -6089,7 +6065,6 @@ export function createThreeSpikeOrb(){
     const reactivity = eqStyle.threeReactivity || 1;
     const contrast = eqStyle.threeContrast || 1;
     const colorByAmplitude = eqStyle.threeColorMode === 'amplitude';
-    ambient.intensity = 0.55 / Math.max(0.5, contrast);
     coreMat.color.copy(tmpColorA).lerp(WHITE_C, 0.5 / contrast);
     const colorAttr = geo.attributes.color;
     for(let i = 0; i < vertexCount; i++){
@@ -6127,7 +6102,9 @@ export function createThreeSpikeOrb(){
     colorAttr.needsUpdate = true;
     geo.computeVertexNormals();
 
-    mat.emissiveIntensity = (0.4 + smoothedLevel * 1.1 + punch * 0.6) * contrast;
+    // Brightness pulse on top of the unlit vertex-colored wireframe -
+    // the closest unlit equivalent of the old emissiveIntensity pulse.
+    mat.color.setScalar(Math.min(1, (0.55 + smoothedLevel * 0.35 + punch * 0.25) * contrast));
     coreMesh.scale.setScalar(1 + smoothedLevel * 0.12 + punch * 0.1);
     coreMat.opacity = 0.12 + smoothedLevel * 0.22 + punch * 0.15;
 
@@ -6458,26 +6435,21 @@ export function createThreeSpikeTower(){
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, 100);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-  scene.add(ambient);
-  const light1 = new THREE.PointLight(0xffffff, 4, 40);
-  light1.position.set(4, 7, 5);
-  scene.add(light1);
-  const light2 = new THREE.PointLight(0xff2d95, 2.6, 40);
-  light2.position.set(-5, 2, -4);
-  scene.add(light2);
+  // No scene lights - same fix as createThreeGridBox(): colored PointLights
+  // tinted to colorStart/colorEnd only ever showed up as a light tint (a
+  // "glow"), while lit shading washed out the actual per-spike gradient.
 
   // Sharp, low-poly (4-sided) needle - a real cone would look smooth/soft;
   // a 4-gon pyramid is what actually reads as "edgy" at this scale.
   const spikeGeo = new THREE.ConeGeometry(0.16, 1, 4);
-  const spikeMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff, metalness: 0.25, roughness: 0.3,
-    emissive: 0x2a1030, emissiveIntensity: 0.7, vertexColors: true
-  });
-  const mesh = new THREE.InstancedMesh(spikeGeo, spikeMat, N);
-  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
-  scene.add(mesh);
+  // Individual Mesh + MeshBasicMaterial per spike, not InstancedMesh +
+  // setColorAt()/instanceColor - same fix as createThreeGridBox().
+  const spikeMeshes = new Array(N);
+  for(let i = 0; i < N; i++){
+    const m = new THREE.Mesh(spikeGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    scene.add(m);
+    spikeMeshes[i] = m;
+  }
 
   const positions = new Float32Array(N * 2); // x, z per spike
   const angles = new Float32Array(N);
@@ -6494,7 +6466,7 @@ export function createThreeSpikeTower(){
 
   const maxRadius = RINGS[RINGS.length - 1].radius + 0.6;
   const baseGeo = new THREE.CylinderGeometry(maxRadius, maxRadius, 0.1, 56);
-  const baseMat = new THREE.MeshStandardMaterial({ color: 0x0a0710, metalness: 0.3, roughness: 0.75 });
+  const baseMat = new THREE.MeshBasicMaterial({ color: 0x0a0710 });
   const base = new THREE.Mesh(baseGeo, baseMat);
   base.position.y = -0.06;
   scene.add(base);
@@ -6516,9 +6488,6 @@ export function createThreeSpikeTower(){
   function applyColors(colorStartHex, colorEndHex){
     lastColorStart = colorStartHex; lastColorEnd = colorEndHex;
     tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
-    light1.color.copy(tmpColorA).lerp(WHITE, 0.6);
-    light2.color.copy(tmpColorB);
-    spikeMat.emissive.copy(tmpColorA).multiplyScalar(0.35);
   }
 
   function update(values, eqStyle, w, h){
@@ -6538,7 +6507,6 @@ export function createThreeSpikeTower(){
     const contrast = eqStyle.threeContrast || 1;
     const thickness = eqStyle.threeThickness || 1;
     const colorByAmplitude = eqStyle.threeColorMode === 'amplitude';
-    ambient.intensity = 0.4 / Math.max(0.5, contrast);
     let peakAll = 0;
 
     for(let i = 0; i < N; i++){
@@ -6557,29 +6525,24 @@ export function createThreeSpikeTower(){
       heights[i] += (targetH - heights[i]) * (rising ? 0.65 : 0.22);
       const hgt = Math.max(MIN_H, heights[i]);
 
-      dummy.position.set(positions[i * 2], hgt / 2, positions[i * 2 + 1]);
-      dummy.rotation.set(0, angles[i], 0);
-      dummy.scale.set(thickness, hgt, thickness);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
+      const m = spikeMeshes[i];
+      m.position.set(positions[i * 2], hgt / 2, positions[i * 2 + 1]);
+      m.rotation.set(0, angles[i], 0);
+      m.scale.set(thickness, hgt, thickness);
 
       const heat = Math.min(1, spikePunch[i] * 1.3);
       const t = colorByAmplitude ? Math.min(1, spikePunch[i]) : i / (N - 1);
       cellColor.copy(tmpColorA).lerp(tmpColorB, t);
       cellColor.lerp(WHITE, (heat * 0.7) / contrast);
-      mesh.setColorAt(i, cellColor);
+      m.material.color.copy(cellColor);
     }
-    mesh.instanceMatrix.needsUpdate = true;
-    if(mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 
     globalPunch = Math.max(peakAll, globalPunch * 0.82);
-    spikeMat.emissiveIntensity = (0.55 + globalPunch * 1.4) * contrast;
 
-    // Beat "kick": a brief FOV punch-in plus a light-intensity flash on
-    // transients, on top of the constantly-wandering orbit.
+    // Beat "kick": a brief FOV punch-in on transients, on top of the
+    // constantly-wandering orbit.
     camera.fov = BASE_FOV - globalPunch * 5.5;
     camera.updateProjectionMatrix();
-    light1.intensity = 3 + globalPunch * 5;
 
     const dt = Math.max(0, Math.min(0.1, elapsed - lastElapsed));
     lastElapsed = elapsed;
@@ -6596,7 +6559,7 @@ export function createThreeSpikeTower(){
 
   function dispose(){
     spikeGeo.dispose();
-    spikeMat.dispose();
+    spikeMeshes.forEach(function(m){ m.material.dispose(); });
     baseGeo.dispose();
     baseMat.dispose();
     renderer.dispose();
@@ -6633,27 +6596,22 @@ export function createThreeGlitchCube(){
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.95);
-  scene.add(ambient);
-  const light1 = new THREE.PointLight(0xffffff, 5.5, 40);
-  light1.position.set(5, 6, 6);
-  scene.add(light1);
-  const light2 = new THREE.PointLight(0x33d6ff, 4, 40);
-  light2.position.set(-6, -4, -5);
-  scene.add(light2);
+  // No scene lights - same fix as createThreeGridBox(): colored PointLights
+  // tinted to colorStart/colorEnd only ever showed up as a light tint (a
+  // "glow"), while lit shading washed out the actual per-cube gradient.
 
   const group = new THREE.Group();
   scene.add(group);
 
   const cubeGeo = new THREE.BoxGeometry(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE);
-  const cubeMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff, metalness: 0.2, roughness: 0.4,
-    emissive: 0x1c3550, emissiveIntensity: 0.85, vertexColors: true
-  });
-  const mesh = new THREE.InstancedMesh(cubeGeo, cubeMat, N);
-  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(N * 3), 3);
-  group.add(mesh);
+  // Individual Mesh + MeshBasicMaterial per cube, not InstancedMesh +
+  // setColorAt()/instanceColor - same fix as createThreeGridBox().
+  const cubeMeshes = new Array(N);
+  for(let i = 0; i < N; i++){
+    const m = new THREE.Mesh(cubeGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    group.add(m);
+    cubeMeshes[i] = m;
+  }
 
   const half = (DIM - 1) / 2;
   const basePos = new Float32Array(N * 3);
@@ -6695,9 +6653,6 @@ export function createThreeGlitchCube(){
   function applyColors(colorStartHex, colorEndHex){
     lastColorStart = colorStartHex; lastColorEnd = colorEndHex;
     tmpColorA.set(colorStartHex); tmpColorB.set(colorEndHex);
-    light1.color.copy(tmpColorA).lerp(WHITE, 0.5);
-    light2.color.copy(tmpColorB);
-    cubeMat.emissive.copy(tmpColorA).multiplyScalar(0.35);
   }
 
   function update(values, eqStyle, w, h){
@@ -6719,7 +6674,6 @@ export function createThreeGlitchCube(){
     const contrast = eqStyle.threeContrast || 1;
     const thickness = eqStyle.threeThickness || 1;
     const colorByAmplitude = eqStyle.threeColorMode === 'amplitude';
-    ambient.intensity = 0.95 / Math.max(0.5, contrast);
     let peakAll = 0;
 
     for(let i = 0; i < N; i++){
@@ -6755,23 +6709,18 @@ export function createThreeGlitchCube(){
         scale = 1 + ease * 0.8;
       }
 
-      dummy.position.set(px, py, pz);
-      dummy.rotation.set(rx, ry, rz);
-      dummy.scale.setScalar(scale * thickness);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
+      const m = cubeMeshes[i];
+      m.position.set(px, py, pz);
+      m.rotation.set(rx, ry, rz);
+      m.scale.setScalar(scale * thickness);
 
       const t2 = colorByAmplitude ? Math.min(1, v) : i / (N - 1);
       cellColor.copy(tmpColorA).lerp(tmpColorB, t2);
       cellColor.lerp(WHITE, (0.25 + flash * 0.75) / contrast);
-      mesh.setColorAt(i, cellColor);
+      m.material.color.copy(cellColor);
     }
-    mesh.instanceMatrix.needsUpdate = true;
-    if(mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 
     globalPunch = Math.max(peakAll, globalPunch * 0.85);
-    cubeMat.emissiveIntensity = (0.45 + globalPunch * 1.1) * contrast;
-    light1.intensity = 3 + globalPunch * 4.5;
 
     const rotSpeed = eqStyle.threeRotationSpeed || 1;
     const rotAxis = eqStyle.threeRotationAxis || 'y';
@@ -6794,7 +6743,7 @@ export function createThreeGlitchCube(){
 
   function dispose(){
     cubeGeo.dispose();
-    cubeMat.dispose();
+    cubeMeshes.forEach(function(m){ m.material.dispose(); });
     renderer.dispose();
   }
 
