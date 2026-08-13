@@ -272,6 +272,12 @@
   .wave-head-left{display:flex;align-items:center;gap:10px;}
   .wave-transport-group{display:flex;align-items:center;gap:4px;}
   .wave-transport-group .rowbtn{width:22px;height:22px;}
+  #waveFollowBtn.active{background:rgba(51,214,192,.2);border-color:var(--accent);color:var(--accent);}
+  #wavePlaybackRate{
+    height:22px;font-size:11px;background:var(--panel2);color:var(--text);
+    border:1px solid var(--line);border-radius:6px;padding:0 3px;cursor:pointer;
+  }
+  #wavePlaybackRate:hover{border-color:var(--accent-dim);}
   /* Horizontal (time-axis) and vertical (amplitude) zoom are the same kind
      of control - a continuous range slider - styled identically, grouped
      together as one cluster with a divider between the two axes. */
@@ -286,20 +292,27 @@
      them physically scroll out of view instead of staying pinned as a
      redrawn "viewport window". .wave-viewport is a plain (non-scrolling)
      wrapper that .wave-scroll-area sits inside, and canvas/playhead attach
-     to it instead - geometrically identical box, but scroll-immune. */
-  .wave-viewport{position:relative;}
+     to it instead - geometrically identical box, but scroll-immune.
+     overflow:hidden clips any of these overlays (playhead, trim handles,
+     fade shapes) when their target time is scrolled out of the visible
+     range - without it they render past the panel's right/left edge
+     instead of just being offscreen within it. */
+  .wave-viewport{position:relative;overflow:hidden;}
   .wave-scroll-area{
     position:relative;overflow-x:auto;overflow-y:hidden;
     height:84px;border:1px solid var(--line);border-radius:8px;background:var(--panel2);
+    cursor:grab;touch-action:none;
   }
+  .wave-scroll-area:active{cursor:grabbing;}
   .wave-scroll-inner{position:relative;height:40px;min-width:100%;}
   .wave-track-row{position:absolute;inset:0;}
   .wave-block{
     position:absolute;top:2px;height:36px;border-radius:4px;
     background:rgba(51,214,192,.18);border:1px solid var(--accent-dim);
     overflow:hidden;font-size:10px;color:var(--text);white-space:nowrap;
-    padding:2px 5px;line-height:1.3;cursor:default;
+    padding:2px 5px;line-height:1.3;cursor:grab;touch-action:none;
   }
+  .wave-block:active{cursor:grabbing;}
   .wave-block.current{background:rgba(51,214,192,.34);border-color:var(--accent);}
   .wave-block.open-ended{border-right-style:dashed;}
   .wave-block.selected{box-shadow:0 0 0 2px var(--accent) inset;}
@@ -315,6 +328,33 @@
     position:absolute;top:0;bottom:0;width:1px;background:var(--danger);
     pointer-events:none;z-index:3;transform:translateX(-9999px);
   }
+
+  /* ---------- Export trim/fade overlay (E-1, E-2) ---------- */
+  .wave-trim-mask{
+    position:absolute;top:0;bottom:0;background:rgba(0,0,0,.55);
+    pointer-events:none;z-index:2;width:0;
+  }
+  .wave-trim-mask.before{left:0;}
+  .wave-fade-overlay{position:absolute;top:0;bottom:0;pointer-events:none;z-index:2;width:0;}
+  .wave-fade-overlay.in{background:linear-gradient(to right, rgba(0,0,0,.45), transparent);}
+  .wave-fade-overlay.out{background:linear-gradient(to left, rgba(0,0,0,.45), transparent);}
+  .wave-trim-handle{
+    position:absolute;top:0;bottom:0;width:9px;margin-left:-4px;
+    cursor:ew-resize;z-index:4;touch-action:none;transform:translateX(-9999px);
+  }
+  .wave-trim-handle::before{
+    content:"";position:absolute;top:0;bottom:0;left:4px;width:2px;background:var(--rec);
+  }
+  .wave-trim-handle::after{
+    content:"";position:absolute;top:0;left:0;width:9px;height:9px;
+    background:var(--rec);clip-path:polygon(0 0,100% 0,50% 100%);
+  }
+  .wave-trim-handle:hover::before,.wave-trim-handle:hover::after{background:#ff8a5c;}
+  .wave-trim-fade-controls{
+    display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:11.5px;color:var(--muted2);
+  }
+  .wave-trim-fade-field{display:flex;align-items:center;gap:6px;}
+  .wave-fade-input{width:48px;text-align:right;}
 
   .empty-state{padding:40px 20px;text-align:center;color:var(--muted2);font-size:13px;line-height:1.8;}
 
@@ -1317,6 +1357,17 @@
               <button class="rowbtn" id="waveFwdBtn" title="5秒進む">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M21.5 12a9.5 9.5 0 1 0-3 6.9"/><path d="M21.5 6v6h-6"/></svg>
               </button>
+              <button class="rowbtn" id="waveFollowBtn" title="再生位置に自動追従（波形を中央固定でスクロール）⇄ 手動スクロール">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+              </button>
+              <select id="wavePlaybackRate" title="再生速度（プレビューのみ、書き出しには影響しません）">
+                <option value="0.5">0.5x</option>
+                <option value="0.75">0.75x</option>
+                <option value="1" selected>1x</option>
+                <option value="1.25">1.25x</option>
+                <option value="1.5">1.5x</option>
+                <option value="2">2x</option>
+              </select>
             </div>
             <span class="hint" id="waveTimelineHint">音源を読み込むと波形が表示されます</span>
           </div>
@@ -1338,7 +1389,23 @@
             </div>
           </div>
           <canvas class="wave-canvas" id="waveCanvas"></canvas>
+          <div class="wave-trim-mask before" id="waveTrimMaskBefore"></div>
+          <div class="wave-trim-mask after" id="waveTrimMaskAfter"></div>
+          <div class="wave-fade-overlay in" id="waveFadeInOverlay"></div>
+          <div class="wave-fade-overlay out" id="waveFadeOutOverlay"></div>
           <div class="wave-playhead" id="wavePlayhead"></div>
+          <div class="wave-trim-handle start" id="waveTrimStartHandle" title="書き出し範囲の開始位置（ドラッグで調整）"></div>
+          <div class="wave-trim-handle end" id="waveTrimEndHandle" title="書き出し範囲の終了位置（ドラッグで調整）"></div>
+        </div>
+        <div class="wave-trim-fade-controls">
+          <span class="hint">書き出し（動画保存）にのみ反映（プレビュー再生には影響しません）:</span>
+          <label class="wave-trim-fade-field">フェードイン
+            <input type="text" class="time-input wave-fade-input" id="waveFadeInInput" value="0" title="開始位置からのフェードイン秒数">秒
+          </label>
+          <label class="wave-trim-fade-field">フェードアウト
+            <input type="text" class="time-input wave-fade-input" id="waveFadeOutInput" value="0" title="終了位置までのフェードアウト秒数">秒
+          </label>
+          <button class="ghost-btn small" id="waveTrimResetBtn">トリムをリセット</button>
         </div>
       </div>
 
@@ -6964,6 +7031,8 @@ export function createThreeParticleBurst(){
   const wavePlayBtn = document.getElementById('wavePlayBtn');
   const wavePlayIcon = document.getElementById('wavePlayIcon');
   const waveFwdBtn = document.getElementById('waveFwdBtn');
+  const waveFollowBtn = document.getElementById('waveFollowBtn');
+  const wavePlaybackRate = document.getElementById('wavePlaybackRate');
   const waveZoomSlider = document.getElementById('waveZoomSlider');
   const waveVZoomSlider = document.getElementById('waveVZoomSlider');
   const waveScrollArea = document.getElementById('waveScrollArea');
@@ -6971,6 +7040,15 @@ export function createThreeParticleBurst(){
   const waveTrackRow = document.getElementById('waveTrackRow');
   const waveCanvas = document.getElementById('waveCanvas');
   const wavePlayhead = document.getElementById('wavePlayhead');
+  const waveTrimMaskBefore = document.getElementById('waveTrimMaskBefore');
+  const waveTrimMaskAfter = document.getElementById('waveTrimMaskAfter');
+  const waveFadeInOverlay = document.getElementById('waveFadeInOverlay');
+  const waveFadeOutOverlay = document.getElementById('waveFadeOutOverlay');
+  const waveTrimStartHandle = document.getElementById('waveTrimStartHandle');
+  const waveTrimEndHandle = document.getElementById('waveTrimEndHandle');
+  const waveFadeInInput = document.getElementById('waveFadeInInput');
+  const waveFadeOutInput = document.getElementById('waveFadeOutInput');
+  const waveTrimResetBtn = document.getElementById('waveTrimResetBtn');
 
   const lyricsWrap = document.getElementById('lyricsWrap');
   const lyricsTextEditor = document.getElementById('lyricsTextEditor');
@@ -7590,6 +7668,7 @@ export function createThreeParticleBurst(){
   /* ===================== Graphic equalizer ===================== */
   let audioCtx = null;
   let analyserNode = null;
+  let exportGainNode = null; // export-only fade in/out (E-2) - gain stays at 1 outside an active recording pass
   let eqDataArray = null;
   let eqTimeDataArray = null;
   let eqEnabled = false;
@@ -7659,12 +7738,19 @@ export function createThreeParticleBurst(){
     if(!Ctx) return;
     audioCtx = new Ctx();
     const sourceNode = audioCtx.createMediaElementSource(audioEl);
+    // Gain stays at 1 (no-op) except during an active recording pass, where
+    // startRecording()/stopRecording() schedule/reset fade automation on it
+    // (E-2) - inserted upstream of the analyser so the EQ visualization
+    // (also captured into the recorded video) fades along with the audio.
+    exportGainNode = audioCtx.createGain();
+    exportGainNode.gain.value = 1;
     analyserNode = audioCtx.createAnalyser();
     analyserNode.fftSize = EQ_FFT_SIZE;
     analyserNode.smoothingTimeConstant = eqStyle.smoothing;
     eqDataArray = new Uint8Array(analyserNode.frequencyBinCount);
     eqTimeDataArray = new Uint8Array(analyserNode.fftSize);
-    sourceNode.connect(analyserNode);
+    sourceNode.connect(exportGainNode);
+    exportGainNode.connect(analyserNode);
     analyserNode.connect(audioCtx.destination);
   }
 
@@ -9998,7 +10084,7 @@ export function createThreeParticleBurst(){
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'preview-style' + timestampSuffix() + '.json';
+    a.download = sanitizeFileNamePart(getCurrentProjectName()) + '_preview-style' + timestampSuffix() + '.json';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -10382,6 +10468,12 @@ export function createThreeParticleBurst(){
       mediaRecorder.stop();
     }
     audioEl.pause();
+    // Cancel/undo any in-flight fade automation (E-2) so normal preview
+    // playback right after a recording pass isn't left at a faded volume.
+    if(exportGainNode && audioCtx){
+      exportGainNode.gain.cancelScheduledValues(audioCtx.currentTime);
+      exportGainNode.gain.setValueAtTime(1, audioCtx.currentTime);
+    }
   }
 
   function startRecording(){
@@ -10473,7 +10565,7 @@ export function createThreeParticleBurst(){
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'preview' + timestampSuffix() + '.' + fileExt;
+      a.download = sanitizeFileNamePart(getCurrentProjectName()) + '_preview' + timestampSuffix() + '.' + fileExt;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -10492,8 +10584,34 @@ export function createThreeParticleBurst(){
     recordVideoBtn.textContent = '録画を停止';
     recordVideoBtn.classList.add('active');
     setStatus('プレビューの録画を開始しました…', '');
-    audioEl.currentTime = 0;
+    audioEl.currentTime = audioTrimStart; // E-1: start from the trimmed-in point, not always 0
     if(audioCtx.state === 'suspended') audioCtx.resume();
+
+    // E-2: schedule fade in/out on the export-only gain node, timed against
+    // the trimmed range (audioTrimStart..recordEndSec) rather than the raw
+    // file - preview playback never touches this node's automation.
+    if(exportGainNode){
+      const recordEndSec = audioTrimEnd !== null ? audioTrimEnd : (audioEl.duration || audioTrimStart);
+      const recordDurationSec = Math.max(0, recordEndSec - audioTrimStart);
+      const now = audioCtx.currentTime;
+      exportGainNode.gain.cancelScheduledValues(now);
+      if(audioFadeInSec > 0){
+        exportGainNode.gain.setValueAtTime(0, now);
+        exportGainNode.gain.linearRampToValueAtTime(1, now + Math.min(audioFadeInSec, recordDurationSec));
+      } else {
+        exportGainNode.gain.setValueAtTime(1, now);
+      }
+      if(audioFadeOutSec > 0){
+        const fadeOutStart = Math.max(0, recordDurationSec - audioFadeOutSec);
+        // Only pin an explicit "1" anchor if it doesn't fall inside the
+        // fade-in ramp above - if fades overlap (fadeIn+fadeOut > duration),
+        // skip it so the fade-out ramp blends smoothly from wherever the
+        // fade-in curve actually is instead of snapping back up to 1 first.
+        if(fadeOutStart >= audioFadeInSec) exportGainNode.gain.setValueAtTime(1, now + fadeOutStart);
+        exportGainNode.gain.linearRampToValueAtTime(0, now + recordDurationSec);
+      }
+    }
+
     audioEl.play();
     mediaRecorder.start();
     drawExportFrame();
@@ -10507,11 +10625,29 @@ export function createThreeParticleBurst(){
   audioEl.addEventListener('timeupdate', function(){
     if(isRecording){
       recordStatusHint.textContent = '録画中: ' + fmtClock(audioEl.currentTime) + ' / ' + fmtClock(audioEl.duration || 0);
+      // E-1: stop at the trimmed-out point instead of waiting for the
+      // file's natural 'ended' event (handleRecordEnded, registered in
+      // startRecording()) when an end trim is set.
+      if(audioTrimEnd !== null && audioEl.currentTime >= audioTrimEnd){
+        stopRecording();
+      }
     }
   });
 
   /* ===================== Helpers ===================== */
   function pad(n, len){ return String(n).padStart(len, '0'); }
+
+  // Prepended to every saved/exported file's name (SRT, video, preview-style
+  // JSON) so files from different projects don't all land in the downloads
+  // folder looking identical (e.g. every project's SRT export used to be
+  // named after the same shared lyrics filename).
+  function getCurrentProjectName(){
+    const opt = projectSelect.selectedOptions && projectSelect.selectedOptions[0];
+    return (opt && opt.textContent) || 'project';
+  }
+  function sanitizeFileNamePart(name){
+    return String(name).replace(/[\\/:*?"<>|]/g, '_').trim() || 'project';
+  }
 
   function timestampSuffix(){
     const d = new Date();
@@ -10579,6 +10715,7 @@ export function createThreeParticleBurst(){
     audioFileName.textContent = file.name;
     setStatus('音源を読み込みました: ' + file.name + '（再生ボタンでプレビューできます）', 'ok');
     resetWaveformPeaks();
+    resetAudioTrimFade();
     ensureWaveformPeaks();
   });
 
@@ -10595,19 +10732,34 @@ export function createThreeParticleBurst(){
     updateWavePlayhead();
   });
 
-  // The wave-view mini transport (wavePlayIcon) mirrors the main playBtn's
-  // icon, so both are driven from the same audioEl play/pause events rather
-  // than duplicating icon-swap logic per button.
+  // The wave-view mini transport (wavePlayIcon) and every per-row "play from
+  // here" button mirror the main playBtn's icon, so all of them are driven
+  // from the same audioEl play/pause events rather than duplicating
+  // icon-swap logic per button.
   const PLAY_ICON_PATH = '<path d="M8 5v14l11-7z"/>';
   const PAUSE_ICON_PATH = '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>';
-  audioEl.addEventListener('play', function(){
-    playIcon.innerHTML = PAUSE_ICON_PATH;
-    wavePlayIcon.innerHTML = PAUSE_ICON_PATH;
-  });
-  audioEl.addEventListener('pause', function(){
-    playIcon.innerHTML = PLAY_ICON_PATH;
-    wavePlayIcon.innerHTML = PLAY_ICON_PATH;
-  });
+  // Only the row matching currentIndex shows a pause icon while playing -
+  // every other row (including the active one once paused) shows play, so
+  // there is always exactly one obvious "this is what's playing, click to
+  // pause" affordance in the table.
+  function rowPlayIconPath(i){
+    return (i === currentIndex && !audioEl.paused) ? PAUSE_ICON_PATH : PLAY_ICON_PATH;
+  }
+  function syncPlayIcons(){
+    const icon = audioEl.paused ? PLAY_ICON_PATH : PAUSE_ICON_PATH;
+    playIcon.innerHTML = icon;
+    wavePlayIcon.innerHTML = icon;
+    tbody.querySelectorAll('tr').forEach(function(tr){
+      const btn = tr.querySelector('.rowbtn.playrow');
+      if(!btn) return;
+      const idx = parseInt(tr.dataset.idx, 10);
+      const svg = btn.querySelector('svg');
+      if(svg) svg.innerHTML = rowPlayIconPath(idx);
+      btn.title = (idx === currentIndex && !audioEl.paused) ? '一時停止' : 'この行の開始位置から再生';
+    });
+  }
+  audioEl.addEventListener('play', syncPlayIcons);
+  audioEl.addEventListener('pause', syncPlayIcons);
 
   function updateTimeDisplay(){
     timeDisplay.textContent = fmtClock(audioEl.currentTime) + ' / ' + fmtClock(audioEl.duration || 0);
@@ -10899,16 +11051,27 @@ export function createThreeParticleBurst(){
       startRow.className = 'time-cell-row';
       const playRowBtn = document.createElement('button');
       playRowBtn.className = 'rowbtn playrow';
-      playRowBtn.textContent = '▶';
-      playRowBtn.title = 'この行の開始位置から再生';
+      const playRowIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      playRowIcon.setAttribute('viewBox', '0 0 24 24');
+      playRowIcon.setAttribute('fill', 'currentColor');
+      playRowIcon.setAttribute('width', '11');
+      playRowIcon.setAttribute('height', '11');
+      playRowIcon.innerHTML = rowPlayIconPath(i);
+      playRowBtn.appendChild(playRowIcon);
+      playRowBtn.title = (i === currentIndex && !audioEl.paused) ? '一時停止' : 'この行の開始位置から再生';
       if(line.isMeta || line.isBlank || line.start === null) playRowBtn.disabled = true;
       playRowBtn.addEventListener('click', function(){
         if(line.start === null) return;
         if(!audioEl.src){ setStatus('先に音源ファイルを開いてください', 'err'); return; }
+        if(i === currentIndex && !audioEl.paused){
+          audioEl.pause();
+          return;
+        }
         currentIndex = i;
         audioEl.currentTime = line.start;
         audioEl.play().catch(function(){});
         renderTable();
+        syncPlayIcons();
       });
       startRow.appendChild(playRowBtn);
       const prevSyncBtn = document.createElement('button');
@@ -11227,10 +11390,11 @@ export function createThreeParticleBurst(){
         if(ev.key === 'ArrowUp'){ ev.preventDefault(); step(ev.shiftKey ? 1 : TIME_STEP_SEC); }
         else if(ev.key === 'ArrowDown'){ ev.preventDefault(); step(ev.shiftKey ? -1 : -TIME_STEP_SEC); }
       });
-      input.addEventListener('wheel', function(ev){
-        ev.preventDefault();
-        step(ev.deltaY < 0 ? TIME_STEP_SEC : -TIME_STEP_SEC);
-      }, { passive: false });
+      // Deliberately no wheel/trackpad-scroll-to-adjust here: with many rows
+      // in the table, scrolling the page/table with the cursor incidentally
+      // over a time input used to change that input's value instead of
+      // scrolling - the ▲/▼ stepper buttons and arrow keys already cover
+      // the same 0.1s/1s nudge without that footgun.
     }
 
     wrap.appendChild(input);
@@ -11317,10 +11481,29 @@ export function createThreeParticleBurst(){
     try { localStorage.setItem(WAVE_VZOOM_KEY, String(waveVZoom)); } catch(e){}
   }
 
+  const WAVE_FOLLOW_KEY = 'srt-maker-wave-follow';
+  function loadWaveFollow(){
+    try { return localStorage.getItem(WAVE_FOLLOW_KEY) === '1'; } catch(e){ return false; }
+  }
+  function saveWaveFollow(){
+    try { localStorage.setItem(WAVE_FOLLOW_KEY, waveFollowPlayhead ? '1' : '0'); } catch(e){}
+  }
+
   let waveZoomPxPerSec = loadWaveZoom();
   let waveVZoom = loadWaveVZoom();
+  let waveFollowPlayhead = loadWaveFollow();
   let waveformPeaks = null;       // { min: Float32Array, max: Float32Array, bucketSec, duration } | null
   let waveformPeaksForFile = null;
+
+  // Export-only trim/fade (E-1, E-2) - restricts/shapes only the recorded
+  // video's audio (see startRecording()); preview playback (audioEl outside
+  // a recording pass) is never affected. Per-project, tied to the loaded
+  // audio file - reset whenever a new file is selected (audioInput change)
+  // or the audio is cleared, restored from the project record otherwise.
+  let audioTrimStart = 0;       // seconds
+  let audioTrimEnd = null;      // seconds | null (null = natural end of file)
+  let audioFadeInSec = 0;
+  let audioFadeOutSec = 0;
 
   function setWaveTimelineHint(msg){
     waveTimelineHint.textContent = msg || (currentAudioFile ? '' : '音源を読み込むと波形が表示されます');
@@ -11464,13 +11647,52 @@ export function createThreeParticleBurst(){
       const x = ev.clientX - rect.left + waveScrollArea.scrollLeft;
       const dur = waveformDurationSec();
       const rawSec = x / waveZoomPxPerSec;
-      const sec = clamp(Math.round(rawSec * 10) / 10, 0, dur > 0 ? dur : rawSec);
+      const sec = clamp(Math.round(rawSec * 100) / 100, 0, dur > 0 ? dur : rawSec);
       commitLineTime(line, field, sec);
       refreshWaveBlock(line);
       refreshTimeInputDom(line, field);
     });
     ['pointerup', 'pointercancel'].forEach(function(evName){
       handleEl.addEventListener(evName, function(){ dragging = false; });
+    });
+  }
+
+  // Dragging the block body (as opposed to a start/end handle) moves the
+  // whole line - start and end shift by the same delta, preserving its
+  // duration - rather than resizing it. The handles' own pointerdown
+  // handlers stopPropagation(), so a drag that starts on a handle never
+  // reaches this listener; only drags starting on the block's own body do.
+  function attachBlockMoveDrag(blockEl, line){
+    let dragging = false;
+    let startClientX = 0, startLineStart = 0, startLineEnd = null;
+    blockEl.addEventListener('pointerdown', function(ev){
+      dragging = true;
+      startClientX = ev.clientX;
+      startLineStart = line.start;
+      startLineEnd = line.end;
+      blockEl.setPointerCapture(ev.pointerId);
+      ev.stopPropagation();
+    });
+    blockEl.addEventListener('pointermove', function(ev){
+      if(!dragging) return;
+      let dSec = Math.round(((ev.clientX - startClientX) / waveZoomPxPerSec) * 100) / 100;
+      // Clamp the delta itself (not just the resulting start) so the shift
+      // never pushes start below 0 while still preserving the original
+      // duration exactly - matches the drag-handles' own "no neighbor/
+      // upper-bound checks, just non-negative" precedent.
+      if(startLineStart + dSec < 0) dSec = -startLineStart;
+      const newStart = Math.round((startLineStart + dSec) * 100) / 100;
+      commitLineTime(line, 'start', newStart);
+      refreshTimeInputDom(line, 'start');
+      if(startLineEnd !== null){
+        const newEnd = Math.round((startLineEnd + dSec) * 100) / 100;
+        commitLineTime(line, 'end', newEnd);
+        refreshTimeInputDom(line, 'end');
+      }
+      refreshWaveBlock(line);
+    });
+    ['pointerup', 'pointercancel'].forEach(function(evName){
+      blockEl.addEventListener(evName, function(){ dragging = false; });
     });
   }
 
@@ -11507,6 +11729,7 @@ export function createThreeParticleBurst(){
       block.appendChild(endHandle);
       attachHandleDrag(startHandle, line, 'start', block);
       attachHandleDrag(endHandle, line, 'end', block);
+      attachBlockMoveDrag(block, line);
 
       waveTrackRow.appendChild(block);
     });
@@ -11524,17 +11747,44 @@ export function createThreeParticleBurst(){
     });
   }
 
-  // Click/tap on empty waveform background seeks, mirroring #seek - handles
-  // and blocks own their own pointer events and stop propagation before
-  // this ever fires.
+  // Pressing on empty waveform background either seeks (a plain click,
+  // mirroring #seek) or pans the view (a drag) - handles and blocks own
+  // their own pointer events and stop propagation before this ever fires.
+  // Distinguished by movement past WAVE_PAN_THRESHOLD_PX: below it, treated
+  // as a click and resolved as a seek on release; past it, the view pans
+  // live and no seek happens.
+  const WAVE_PAN_THRESHOLD_PX = 4;
   waveScrollArea.addEventListener('pointerdown', function(ev){
     if(ev.target.closest('.wave-handle, .wave-block')) return;
     if(!audioEl.src) return;
-    const rect = waveScrollArea.getBoundingClientRect();
-    const x = ev.clientX - rect.left + waveScrollArea.scrollLeft;
-    const dur = waveformDurationSec();
-    audioEl.currentTime = clamp(x / waveZoomPxPerSec, 0, dur > 0 ? dur : x / waveZoomPxPerSec);
-    updateWavePlayhead();
+    let panning = false;
+    const startClientX = ev.clientX;
+    const startScrollLeft = waveScrollArea.scrollLeft;
+    waveScrollArea.setPointerCapture(ev.pointerId);
+
+    function onMove(mv){
+      const dx = mv.clientX - startClientX;
+      if(!panning && Math.abs(dx) > WAVE_PAN_THRESHOLD_PX){
+        panning = true;
+        disengageWaveFollow(); // don't fight the drag the instant it starts
+      }
+      if(panning) waveScrollArea.scrollLeft = startScrollLeft - dx;
+    }
+    function onUp(upEv){
+      waveScrollArea.removeEventListener('pointermove', onMove);
+      waveScrollArea.removeEventListener('pointerup', onUp);
+      waveScrollArea.removeEventListener('pointercancel', onUp);
+      if(!panning){
+        const rect = waveScrollArea.getBoundingClientRect();
+        const x = upEv.clientX - rect.left + waveScrollArea.scrollLeft;
+        const dur = waveformDurationSec();
+        audioEl.currentTime = clamp(x / waveZoomPxPerSec, 0, dur > 0 ? dur : x / waveZoomPxPerSec);
+        updateWavePlayhead();
+      }
+    }
+    waveScrollArea.addEventListener('pointermove', onMove);
+    waveScrollArea.addEventListener('pointerup', onUp);
+    waveScrollArea.addEventListener('pointercancel', onUp);
   });
 
   function resizeWaveCanvas(){
@@ -11551,6 +11801,7 @@ export function createThreeParticleBurst(){
   }
 
   function redrawWaveCanvas(){
+    redrawTrimFadeOverlay(); // independent of peaks being ready - only needs duration
     const ctx = waveCanvas.getContext('2d');
     const widthCss = waveScrollArea.clientWidth || 0;
     ctx.clearRect(0, 0, widthCss, 36);
@@ -11581,13 +11832,153 @@ export function createThreeParticleBurst(){
     }
   }
 
+  // Positions the trim handles/masks and fade-shape overlays over the
+  // waveform - same time->px mapping as everything else in the wave view
+  // (waveZoomPxPerSec, scrollLeft), so it's called from the same places
+  // redrawWaveCanvas() already is rather than needing its own trigger wiring.
+  function redrawTrimFadeOverlay(){
+    const dur = waveformDurationSec();
+    if(!dur){
+      waveTrimMaskBefore.style.width = '0px';
+      waveTrimMaskAfter.style.width = '0px';
+      waveFadeInOverlay.style.width = '0px';
+      waveFadeOutOverlay.style.width = '0px';
+      waveTrimStartHandle.style.transform = 'translateX(-9999px)';
+      waveTrimEndHandle.style.transform = 'translateX(-9999px)';
+      return;
+    }
+    const scrollLeft = waveScrollArea.scrollLeft;
+    const trimEnd = audioTrimEnd !== null ? audioTrimEnd : dur;
+    function toX(sec){ return sec * waveZoomPxPerSec - scrollLeft; }
+
+    const startX = toX(audioTrimStart);
+    const endX = toX(trimEnd);
+    const contentRightX = toX(dur);
+
+    waveTrimMaskBefore.style.width = Math.max(0, startX) + 'px';
+    waveTrimStartHandle.style.transform = 'translateX(' + startX + 'px)';
+
+    waveTrimMaskAfter.style.left = Math.max(0, endX) + 'px';
+    waveTrimMaskAfter.style.width = Math.max(0, contentRightX - endX) + 'px';
+    waveTrimEndHandle.style.transform = 'translateX(' + endX + 'px)';
+
+    const trimmedWidth = Math.max(0, endX - startX);
+    const fadeInWidth = Math.max(0, Math.min(audioFadeInSec * waveZoomPxPerSec, trimmedWidth));
+    waveFadeInOverlay.style.left = startX + 'px';
+    waveFadeInOverlay.style.width = fadeInWidth + 'px';
+
+    const fadeOutWidth = Math.max(0, Math.min(audioFadeOutSec * waveZoomPxPerSec, trimmedWidth));
+    waveFadeOutOverlay.style.left = (endX - fadeOutWidth) + 'px';
+    waveFadeOutOverlay.style.width = fadeOutWidth + 'px';
+  }
+
+  function resetAudioTrimFade(){
+    audioTrimStart = 0;
+    audioTrimEnd = null;
+    audioFadeInSec = 0;
+    audioFadeOutSec = 0;
+    waveFadeInInput.value = '0';
+    waveFadeOutInput.value = '0';
+    redrawTrimFadeOverlay();
+  }
+
+  function attachTrimHandleDrag(handleEl, isStart){
+    let dragging = false;
+    handleEl.addEventListener('pointerdown', function(ev){
+      dragging = true;
+      handleEl.setPointerCapture(ev.pointerId);
+      ev.stopPropagation();
+    });
+    handleEl.addEventListener('pointermove', function(ev){
+      if(!dragging) return;
+      const rect = waveScrollArea.getBoundingClientRect();
+      const x = ev.clientX - rect.left + waveScrollArea.scrollLeft;
+      const dur = waveformDurationSec();
+      if(!dur) return;
+      const sec = clamp(Math.round((x / waveZoomPxPerSec) * 100) / 100, 0, dur);
+      if(isStart){
+        const curEnd = audioTrimEnd !== null ? audioTrimEnd : dur;
+        audioTrimStart = clamp(sec, 0, Math.max(0, curEnd - 0.1));
+      } else {
+        let newEnd = clamp(sec, audioTrimStart + 0.1, dur);
+        // Snap back to "no end trim" once dragged within a frame of the
+        // natural end, so the common case (trim start only) doesn't leave
+        // a stray near-full-duration end value sitting in the project record.
+        audioTrimEnd = (dur - newEnd < 0.05) ? null : newEnd;
+      }
+      redrawTrimFadeOverlay();
+    });
+    ['pointerup', 'pointercancel'].forEach(function(evName){
+      handleEl.addEventListener(evName, function(){
+        if(dragging) scheduleSaveSession();
+        dragging = false;
+      });
+    });
+  }
+  attachTrimHandleDrag(waveTrimStartHandle, true);
+  attachTrimHandleDrag(waveTrimEndHandle, false);
+
+  function commitFadeInInput(){
+    const v = parseFloat(waveFadeInInput.value);
+    audioFadeInSec = (isFinite(v) && v >= 0) ? v : 0;
+    waveFadeInInput.value = String(audioFadeInSec);
+    redrawTrimFadeOverlay();
+    scheduleSaveSession();
+  }
+  function commitFadeOutInput(){
+    const v = parseFloat(waveFadeOutInput.value);
+    audioFadeOutSec = (isFinite(v) && v >= 0) ? v : 0;
+    waveFadeOutInput.value = String(audioFadeOutSec);
+    redrawTrimFadeOverlay();
+    scheduleSaveSession();
+  }
+  waveFadeInInput.addEventListener('change', commitFadeInInput);
+  waveFadeOutInput.addEventListener('change', commitFadeOutInput);
+
+  waveTrimResetBtn.addEventListener('click', function(){
+    audioTrimStart = 0;
+    audioTrimEnd = null;
+    redrawTrimFadeOverlay();
+    scheduleSaveSession();
+    setStatus('トリム範囲をリセットしました', 'ok');
+  });
+
+  // Follow mode fights any manual scroll/pan unless it turns itself off the
+  // moment the user takes over - otherwise every timeupdate tick snaps the
+  // view straight back to center mid-drag. `suppressFollowScrollCheck` lets
+  // centerScrollOnPlayhead()'s own scrollLeft writes through without being
+  // mistaken for a manual scroll (scroll events fire near the next frame,
+  // not synchronously with the assignment, hence clearing it in rAF rather
+  // than immediately).
+  let suppressFollowScrollCheck = false;
+  function disengageWaveFollow(){
+    if(!waveFollowPlayhead) return;
+    waveFollowPlayhead = false;
+    updateWaveFollowBtn();
+    saveWaveFollow();
+    setStatus('波形の自動追従を解除しました（手動スクロールされたため）', '');
+  }
+
+  // When follow mode is on, re-centers the scroll position on the playhead
+  // before it's drawn, so updateWavePlayhead()'s own position calculation
+  // (which reads scrollLeft) naturally comes out to ~half the viewport
+  // width - one function change instead of touching every timeupdate call site.
+  function centerScrollOnPlayhead(){
+    if(!waveFollowPlayhead) return;
+    suppressFollowScrollCheck = true;
+    const target = audioEl.currentTime * waveZoomPxPerSec - waveScrollArea.clientWidth / 2;
+    waveScrollArea.scrollLeft = Math.max(0, target);
+    requestAnimationFrame(function(){ suppressFollowScrollCheck = false; });
+  }
   function updateWavePlayhead(){
+    centerScrollOnPlayhead();
     const x = audioEl.currentTime * waveZoomPxPerSec - waveScrollArea.scrollLeft;
     wavePlayhead.style.transform = 'translateX(' + x + 'px)';
   }
 
   let waveScrollRAF = null;
   waveScrollArea.addEventListener('scroll', function(){
+    if(!suppressFollowScrollCheck) disengageWaveFollow();
     if(waveScrollRAF) return;
     waveScrollRAF = requestAnimationFrame(function(){
       waveScrollRAF = null;
@@ -11598,8 +11989,19 @@ export function createThreeParticleBurst(){
 
   waveZoomSlider.value = String(waveZoomPxPerSec);
   waveZoomSlider.addEventListener('input', function(){
+    // Zoom around the time currently at the viewport's center, not the
+    // scroll-container's left edge, so the waveform doesn't appear to
+    // "slide away" from what the user was just looking at while dragging.
+    const oldZoom = waveZoomPxPerSec;
+    const viewportCenterSec = (waveScrollArea.scrollLeft + waveScrollArea.clientWidth / 2) / oldZoom;
     waveZoomPxPerSec = parseFloat(waveZoomSlider.value);
     repositionAllWaveBlocks();
+    // Not a manual scroll - don't let it disengage follow mode (see
+    // disengageWaveFollow()); when follow is on, the viewport center is
+    // already the playhead, so this keeps it centered rather than fighting it.
+    suppressFollowScrollCheck = true;
+    waveScrollArea.scrollLeft = Math.max(0, viewportCenterSec * waveZoomPxPerSec - waveScrollArea.clientWidth / 2);
+    requestAnimationFrame(function(){ suppressFollowScrollCheck = false; });
   });
   waveZoomSlider.addEventListener('change', function(){ saveWaveZoom(); });
 
@@ -11609,6 +12011,22 @@ export function createThreeParticleBurst(){
     redrawWaveCanvas();
   });
   waveVZoomSlider.addEventListener('change', function(){ saveWaveVZoom(); });
+
+  function updateWaveFollowBtn(){
+    waveFollowBtn.classList.toggle('active', waveFollowPlayhead);
+  }
+  waveFollowBtn.addEventListener('click', function(){
+    waveFollowPlayhead = !waveFollowPlayhead;
+    updateWaveFollowBtn();
+    saveWaveFollow();
+    if(waveFollowPlayhead) updateWavePlayhead(); // snap to center immediately on enabling
+  });
+  updateWaveFollowBtn();
+
+  // Preview-only playback speed - does not affect export/recording (see C-9).
+  wavePlaybackRate.addEventListener('change', function(){
+    audioEl.playbackRate = parseFloat(wavePlaybackRate.value);
+  });
 
   if(window.ResizeObserver){
     new ResizeObserver(function(){ resizeWaveCanvas(); }).observe(waveScrollArea);
@@ -12027,7 +12445,7 @@ export function createThreeParticleBurst(){
     const a = document.createElement('a');
     const baseName = (lyricsFileName.textContent || 'lyrics').replace(/\.[^.]+$/, '');
     a.href = url;
-    a.download = (baseName === '未選択' ? 'subtitles' : baseName) + timestampSuffix() + '.srt';
+    a.download = sanitizeFileNamePart(getCurrentProjectName()) + '_' + (baseName === '未選択' ? 'subtitles' : baseName) + timestampSuffix() + '.srt';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -12200,7 +12618,8 @@ export function createThreeParticleBurst(){
         lyricsFileName: lyricsFileName.textContent,
         lyricsLines: lyricsLines,
         uid: uid,
-        previewSettings: getFullPreviewSettings()
+        previewSettings: getFullPreviewSettings(),
+        audioTrim: { start: audioTrimStart, end: audioTrimEnd, fadeIn: audioFadeInSec, fadeOut: audioFadeOutSec }
       };
       return putProject(record);
     });
@@ -12228,6 +12647,7 @@ export function createThreeParticleBurst(){
     seek.disabled = true;
     updateTimeDisplay();
     resetWaveformPeaks();
+    resetAudioTrimFade();
   }
 
   // Loads a project record into the live app state - used both for the
@@ -12254,6 +12674,18 @@ export function createThreeParticleBurst(){
       audioEl.load();
       audioFileName.textContent = record.audioFileName || '未選択';
       ensureWaveformPeaks();
+    }
+    // Restore after clearAudioState()'s own resetAudioTrimFade() so an older
+    // project record without this field just keeps the just-reset defaults.
+    const trim = record.audioTrim;
+    if(trim){
+      audioTrimStart = typeof trim.start === 'number' ? trim.start : 0;
+      audioTrimEnd = typeof trim.end === 'number' ? trim.end : null;
+      audioFadeInSec = typeof trim.fadeIn === 'number' ? trim.fadeIn : 0;
+      audioFadeOutSec = typeof trim.fadeOut === 'number' ? trim.fadeOut : 0;
+      waveFadeInInput.value = String(audioFadeInSec);
+      waveFadeOutInput.value = String(audioFadeOutSec);
+      redrawTrimFadeOverlay();
     }
 
     clearPreviewBgState();
