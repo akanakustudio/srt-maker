@@ -5990,8 +5990,9 @@ export function createThreeSpikeOrb(){
   renderer.setClearColor(0x000000, 0);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
+  const BASE_FOV = 46;
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 100);
+  const camera = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, 100);
 
   // No scene lights - same fix as createThreeGridBox()/createThreeWaveGrid():
   // colored PointLights tinted to colorStart/colorEnd only ever showed up as
@@ -6067,7 +6068,9 @@ export function createThreeSpikeOrb(){
     // Fast-attack / slow-decay transient envelope: jumps to a loud instant
     // immediately, then eases back down, so kicks/snares punch the orb
     // outward and let go, instead of every frame reading as similarly-sized.
-    punch = Math.max(peak, punch * 0.86);
+    // Decay quickened (0.86->0.78) so consecutive hits each land as a
+    // distinct, sharp pop instead of blurring into one sustained swell.
+    punch = Math.max(peak, punch * 0.78);
 
     const elapsed = (performance.now() - startTime) / 1000;
     const reactivity = eqStyle.threeReactivity || 1;
@@ -6093,9 +6096,12 @@ export function createThreeSpikeOrb(){
       const barIdx = Math.min(n - 1, Math.floor(longitude * n));
       const bandLevel = n ? values[barIdx] : 0;
 
-      const rawBump = reactivity * (organic * (0.14 + smoothedLevel * 0.6 + punch * 0.35)
+      // Punch's weight roughly doubled (0.35->0.75) and the clamp range
+      // widened (0.85->1.4) so a loud transient visibly slams the orb
+      // outward on the beat, not just nudges its surface.
+      const rawBump = reactivity * (organic * (0.14 + smoothedLevel * 0.6 + punch * 0.75)
         + bandLevel * 0.75 * (0.35 + Math.abs(nFine) * 0.65));
-      const bump = Math.max(-0.35, Math.min(0.85, rawBump));
+      const bump = Math.max(-0.35, Math.min(1.4, rawBump));
       const radius = RADIUS * (1 + bump);
 
       posAttr.setXYZ(i, dx * radius, dy * radius, dz * radius);
@@ -6112,9 +6118,14 @@ export function createThreeSpikeOrb(){
 
     // Brightness pulse on top of the unlit vertex-colored wireframe -
     // the closest unlit equivalent of the old emissiveIntensity pulse.
-    mat.color.setScalar(Math.min(1, (0.55 + smoothedLevel * 0.35 + punch * 0.25) * contrast));
-    coreMesh.scale.setScalar(1 + smoothedLevel * 0.12 + punch * 0.1);
-    coreMat.opacity = 0.12 + smoothedLevel * 0.22 + punch * 0.15;
+    // Punch's weight raised throughout (0.25->0.55, 0.1->0.3, 0.15->0.4) so
+    // the whole orb visibly flashes/swells together on a beat, not just the
+    // vertex displacement.
+    mat.color.setScalar(Math.min(1, (0.55 + smoothedLevel * 0.35 + punch * 0.55) * contrast));
+    coreMesh.scale.setScalar(1 + smoothedLevel * 0.12 + punch * 0.3);
+    coreMat.opacity = Math.min(1, 0.12 + smoothedLevel * 0.22 + punch * 0.4);
+    camera.fov = BASE_FOV - punch * 6;
+    camera.updateProjectionMatrix();
 
     // Random-feeling orbit: angular velocity and elevation wander via noise
     // instead of advancing at a constant rate, so the camera speeds up,
@@ -6601,8 +6612,9 @@ export function createThreeGlitchCube(){
   renderer.setClearColor(0x000000, 0);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
+  const BASE_FOV = 42;
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
+  const camera = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, 100);
 
   // No scene lights - same fix as createThreeGridBox(): colored PointLights
   // tinted to colorStart/colorEnd only ever showed up as a light tint (a
@@ -6691,11 +6703,15 @@ export function createThreeGlitchCube(){
 
       // Onset detection per cube: a sudden rise (not just "loud") triggers
       // a fresh glitch burst, so this reacts to musical hits, not sustain.
-      if(glitchT[i] <= 0 && v > prevVal[i] + 0.16 && v > 0.28){
+      // Threshold lowered (0.16/0.28 -> 0.11/0.2) so more cubes actually
+      // fire on a typical beat instead of only the loudest isolated hits.
+      if(glitchT[i] <= 0 && v > prevVal[i] + 0.11 && v > 0.2){
         const dur = 0.12 + Math.random() * 0.16;
         glitchT[i] = dur;
         glitchDur[i] = dur;
-        const amt = (0.6 + v * 1.8) * reactivity * SPACING;
+        // Displacement amount raised (0.6/1.8 -> 1.0/2.6) for a much bigger,
+        // more violent jump per glitch.
+        const amt = (1.0 + v * 2.6) * reactivity * SPACING;
         offX[i] = (Math.random() * 2 - 1) * amt;
         offY[i] = (Math.random() * 2 - 1) * amt;
         offZ[i] = (Math.random() * 2 - 1) * amt;
@@ -6714,7 +6730,7 @@ export function createThreeGlitchCube(){
         px += offX[i] * ease; py += offY[i] * ease; pz += offZ[i] * ease;
         rx = rotX[i] * ease; ry = rotY[i] * ease; rz = rotZ[i] * ease;
         flash = ease;
-        scale = 1 + ease * 0.8;
+        scale = 1 + ease * 1.4; // was 0.8 - bigger pop per glitch
       }
 
       const m = cubeMeshes[i];
@@ -6728,7 +6744,13 @@ export function createThreeGlitchCube(){
       m.material.color.copy(cellColor);
     }
 
-    globalPunch = Math.max(peakAll, globalPunch * 0.85);
+    globalPunch = Math.max(peakAll, globalPunch * 0.8);
+    // Whole-block scale pulse + a camera dolly-in/FOV kick on top of the
+    // per-cube glitches, so a hard beat reads as the entire block punching
+    // toward the camera, not just its individual cubes twitching.
+    group.scale.setScalar(1 + globalPunch * 0.18);
+    camera.fov = BASE_FOV - globalPunch * 6;
+    camera.updateProjectionMatrix();
 
     const rotSpeed = eqStyle.threeRotationSpeed || 1;
     const rotAxis = eqStyle.threeRotationAxis || 'y';
@@ -6742,7 +6764,7 @@ export function createThreeGlitchCube(){
 
     const angVel = (0.1 + noise(elapsed * 0.04, 71.2, 0) * 0.1) * rotSpeed;
     camAngleAccum += angVel * dt;
-    const camDist = 8.2 - globalPunch * 0.5;
+    const camDist = 8.2 - globalPunch * 1.1;
     camera.position.set(Math.sin(camAngleAccum) * camDist, 2.4 + Math.sin(elapsed * 0.13) * 0.6, Math.cos(camAngleAccum) * camDist);
     camera.lookAt(0, 0, 0);
 
@@ -6798,8 +6820,9 @@ export function createThreeParticleBurst(){
   renderer.setClearColor(0x000000, 0);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
+  const BASE_FOV = 48;
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(48, 1, 0.1, 100);
+  const camera = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.1, 100);
   camera.position.set(0, 0, 9);
 
   const geo = new THREE.BufferGeometry();
@@ -6837,6 +6860,7 @@ export function createThreeParticleBurst(){
   const startTime = performance.now();
   let lastElapsed = 0;
   let camAngleAccum = 0;
+  let globalPunch = 0;
   const tmpColorA = new THREE.Color();
   const tmpColorB = new THREE.Color();
   const cellColor = new THREE.Color();
@@ -6855,7 +6879,10 @@ export function createThreeParticleBurst(){
       const i = nextSpawn;
       nextSpawn = (nextSpawn + 1) % POOL;
       age[i] = 0;
-      speed[i] = (2.2 + Math.random() * 2.4) * (0.5 + strength);
+      // Speed range widened and its strength-scaling roughly tripled
+      // (0.5+strength -> 0.6+strength*1.6) so loud hits visibly fire
+      // particles faster/farther, not just more of them.
+      speed[i] = (2.6 + Math.random() * 3.2) * (0.6 + strength * 1.6);
       const t = colorByAmplitude ? Math.min(1, strength) : (n ? bin / n : 0);
       cellColor.copy(tmpColorA).lerp(tmpColorB, t).lerp(WHITE, Math.min(0.5, strength * 0.5) / currentContrast);
       partColorR[i] = cellColor.r; partColorG[i] = cellColor.g; partColorB[i] = cellColor.b;
@@ -6880,21 +6907,31 @@ export function createThreeParticleBurst(){
     const reactivity = eqStyle.threeReactivity || 1;
     colorByAmplitude = eqStyle.threeColorMode === 'amplitude';
     currentContrast = eqStyle.threeContrast || 1;
-    mat.size = 0.16 * (eqStyle.threeThickness || 1);
 
+    let peakAll = 0;
     // Onset detection per frequency band -> a burst of fresh particles
     // fired for that band; a low-level continuous trickle keeps the ring
-    // from ever looking completely dead during quiet passages.
+    // from ever looking completely dead during quiet passages. Threshold
+    // lowered (0.14/0.22 -> 0.1/0.16) and burst size roughly doubled
+    // (14+v*40 -> 20+v*80) so bursts fire more often and hit much harder.
     for(let b = 0; b < n; b++){
       const v = values[b];
-      if(v > prevVal[b] + 0.14 && v > 0.22){
-        spawnBurst(b, n, Math.round(14 + v * 40), v);
+      if(v > peakAll) peakAll = v;
+      if(v > prevVal[b] + 0.1 && v > 0.16){
+        spawnBurst(b, n, Math.round(20 + v * 80), v);
       }
       prevVal[b] = v;
     }
     if(Math.random() < 0.6){
       spawnBurst(Math.floor(Math.random() * Math.max(1, n)), n, 2, 0.15);
     }
+    globalPunch = Math.max(peakAll, globalPunch * 0.82);
+    // Particle size and a camera FOV kick pulse with the beat on top of the
+    // per-burst reactivity, so a hard hit reads as the whole ring flashing
+    // bigger/closer, not just more particles spawning.
+    mat.size = 0.16 * (eqStyle.threeThickness || 1) * (1 + globalPunch * 0.6);
+    camera.fov = BASE_FOV - globalPunch * 5;
+    camera.updateProjectionMatrix();
 
     for(let i = 0; i < POOL; i++){
       age[i] += dt;
