@@ -497,6 +497,13 @@
     font-size:10px;cursor:pointer;padding:0;text-align:center;
   }
   .eq-color-bookmark-chip .bookmark-del:hover{color:var(--danger);border-color:var(--danger);}
+  .eq-color-bookmark-chip .bookmark-rename{
+    position:absolute;top:-5px;left:-5px;width:14px;height:14px;line-height:12px;
+    border-radius:50%;background:var(--panel);border:1px solid var(--line);color:var(--muted);
+    font-size:9px;cursor:pointer;padding:0;text-align:center;
+  }
+  .eq-color-bookmark-chip .bookmark-rename:hover{color:var(--accent);border-color:var(--accent-dim);}
+  .bookmark-section-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
 
   .bookmark-row{width:100%;flex-wrap:wrap;}
   .bookmark-chip-list{display:flex;flex-wrap:wrap;gap:5px;width:100%;}
@@ -508,6 +515,11 @@
     background:none;border:none;color:var(--text);font-size:11px;padding:4px 7px;cursor:pointer;
   }
   .bookmark-chip-apply:hover{background:rgba(51,214,192,.12);color:var(--accent);}
+  .bookmark-chip-rename{
+    background:none;border:none;border-left:1px solid var(--line);color:var(--muted);
+    font-size:10px;padding:4px 6px;cursor:pointer;
+  }
+  .bookmark-chip-rename:hover{color:var(--accent);}
   .bookmark-chip-del{
     background:none;border:none;border-left:1px solid var(--line);color:var(--muted);
     font-size:10px;padding:4px 6px;cursor:pointer;
@@ -1062,7 +1074,12 @@
           </label>
           <div class="preview-control bookmark-row">
             <span>フォントブックマーク</span>
-            <button class="toggle-btn" type="button" id="fontBookmarkAddBtn">＋現在のフォント設定を保存</button>
+            <div class="bookmark-section-actions">
+              <button class="toggle-btn" type="button" id="fontBookmarkAddBtn">＋現在のフォント設定を保存</button>
+              <button class="toggle-btn" type="button" id="fontBookmarkExportBtn">書き出し</button>
+              <label class="toggle-btn" for="fontBookmarkImportInput">読み込み</label>
+              <input type="file" id="fontBookmarkImportInput" accept="application/json" style="display:none">
+            </div>
           </div>
           <div class="bookmark-chip-list" id="fontBookmarkList"></div>
         </div>
@@ -1233,6 +1250,9 @@
               <div class="eq-color-preset-group-label">マイブックマーク</div>
               <div class="eq-color-bookmark-list" id="eqColorBookmarkList"></div>
               <button type="button" class="eq-color-preset-bookmark-add" id="eqColorBookmarkAddBtn" title="現在のカラー1・カラー2をブックマークに保存">＋現在の色を保存</button>
+              <button type="button" class="eq-color-preset-bookmark-add" id="eqColorBookmarkExportBtn">書き出し</button>
+              <label class="eq-color-preset-bookmark-add" for="eqColorBookmarkImportInput">読み込み</label>
+              <input type="file" id="eqColorBookmarkImportInput" accept="application/json" style="display:none">
             </div>
               </div>
             </div>
@@ -1327,7 +1347,12 @@
           <button class="toggle-btn" type="button" id="eqAutoStyleBtn">曲の雰囲気から自動生成</button>
           <div class="preview-control bookmark-row">
             <span>EQブックマーク</span>
-            <button class="toggle-btn" type="button" id="eqBookmarkAddBtn">＋現在のEQ設定を保存</button>
+            <div class="bookmark-section-actions">
+              <button class="toggle-btn" type="button" id="eqBookmarkAddBtn">＋現在のEQ設定を保存</button>
+              <button class="toggle-btn" type="button" id="eqBookmarkExportBtn">書き出し</button>
+              <label class="toggle-btn" for="eqBookmarkImportInput">読み込み</label>
+              <input type="file" id="eqBookmarkImportInput" accept="application/json" style="display:none">
+            </div>
           </div>
           <div class="bookmark-chip-list" id="eqBookmarkList"></div>
         </div>
@@ -7369,6 +7394,8 @@ export function createThreeKaleidoscope(){
   const lyricsOffsetNumber = document.getElementById('lyricsOffsetNumber');
   const fontBookmarkAddBtn = document.getElementById('fontBookmarkAddBtn');
   const fontBookmarkList = document.getElementById('fontBookmarkList');
+  const fontBookmarkExportBtn = document.getElementById('fontBookmarkExportBtn');
+  const fontBookmarkImportInput = document.getElementById('fontBookmarkImportInput');
   const highlightModeLineBtn = document.getElementById('highlightModeLine');
   const highlightModeTextBtn = document.getElementById('highlightModeText');
   const previewStageOuter = document.getElementById('previewStageOuter');
@@ -7406,6 +7433,8 @@ export function createThreeKaleidoscope(){
   const eqColorPresetList = document.getElementById('eqColorPresetList');
   const eqColorBookmarkList = document.getElementById('eqColorBookmarkList');
   const eqColorBookmarkAddBtn = document.getElementById('eqColorBookmarkAddBtn');
+  const eqColorBookmarkExportBtn = document.getElementById('eqColorBookmarkExportBtn');
+  const eqColorBookmarkImportInput = document.getElementById('eqColorBookmarkImportInput');
   const eqColorStartInput = document.getElementById('eqColorStart');
   const eqColorEndInput = document.getElementById('eqColorEnd');
   const eqBarCountInput = document.getElementById('eqBarCount');
@@ -7427,6 +7456,8 @@ export function createThreeKaleidoscope(){
   const eqAutoStyleBtn = document.getElementById('eqAutoStyleBtn');
   const eqBookmarkAddBtn = document.getElementById('eqBookmarkAddBtn');
   const eqBookmarkList = document.getElementById('eqBookmarkList');
+  const eqBookmarkExportBtn = document.getElementById('eqBookmarkExportBtn');
+  const eqBookmarkImportInput = document.getElementById('eqBookmarkImportInput');
   const previewStyleSaveBtn = document.getElementById('previewStyleSaveBtn');
   const previewStyleLoadInput = document.getElementById('previewStyleLoadInput');
   const exportResolutionSelect = document.getElementById('exportResolution');
@@ -9893,6 +9924,75 @@ export function createThreeKaleidoscope(){
     return trimmed === '' ? null : trimmed;
   }
 
+  function renameBookmark(kind, index, rerender){
+    const list = loadBookmarks(kind);
+    const bm = list[index];
+    if(!bm) return;
+    const name = window.prompt('ブックマーク名を変更', bm.name);
+    if(name === null) return;
+    const trimmed = name.trim();
+    if(!trimmed) return;
+    bm.name = trimmed;
+    saveBookmarks(kind, list);
+    rerender();
+  }
+
+  const BOOKMARK_KIND_LABELS = { eq: 'EQ設定', font: 'フォント設定', color: 'EQカラーパターン' };
+
+  function exportBookmarks(kind){
+    const list = loadBookmarks(kind);
+    if(!list.length){ setStatus('保存するブックマークがありません', 'err'); return; }
+    const payload = { _type: 'srt-maker-bookmarks', kind: kind, version: 1, bookmarks: list };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = sanitizeFileNamePart(getCurrentProjectName()) + '_' + (BOOKMARK_KIND_LABELS[kind] || kind) + 'ブックマーク' + timestampSuffix() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+    setStatus('ブックマークを保存しました', 'ok');
+  }
+
+  // Always merges (appends) the file's bookmarks onto the existing list,
+  // never replaces it - importing is additive so combining bookmark sets
+  // from multiple files/people never silently discards what's already there.
+  // sanitizeData (optional) validates/normalizes each incoming entry's
+  // `data` payload per kind (e.g. sanitizeEqStyle for 'eq'); entries it
+  // rejects (returns a falsy value) are skipped rather than aborting the
+  // whole import.
+  function importBookmarksFromFile(kind, file, sanitizeData, rerender){
+    const reader = new FileReader();
+    reader.onload = function(ev){
+      try {
+        const obj = JSON.parse(ev.target.result);
+        const incoming = Array.isArray(obj) ? obj : (obj && Array.isArray(obj.bookmarks) ? obj.bookmarks : null);
+        if(!incoming) throw new Error('ブックマーク形式が不正です');
+        const list = loadBookmarks(kind);
+        let added = 0;
+        incoming.forEach(function(bm){
+          if(!bm || typeof bm.name !== 'string' || !bm.name.trim() || !bm.data) return;
+          const data = sanitizeData ? sanitizeData(bm.data) : bm.data;
+          if(!data) return;
+          list.push({ name: bm.name.trim(), data: data });
+          added++;
+        });
+        saveBookmarks(kind, list);
+        rerender();
+        setStatus(added + '件のブックマークを読み込みました', 'ok');
+      } catch(err){
+        setStatus('ブックマークの読み込みに失敗しました: ' + err.message, 'err');
+      }
+    };
+    reader.readAsText(file, 'UTF-8');
+  }
+
+  function sanitizeBookmarkColorData(data){
+    if(!data || !/^#[0-9a-fA-F]{6}$/.test(data.colorStart) || !/^#[0-9a-fA-F]{6}$/.test(data.colorEnd)) return null;
+    return { colorStart: data.colorStart, colorEnd: data.colorEnd };
+  }
+
   /* ---------- EQ style customization ---------- */
   function isThreeEqType(type){ return typeof type === 'string' && type.indexOf('three') === 0; }
   function updateThreeEqControlsVisibility(type){ threeEqControls.classList.toggle('visible', isThreeEqType(type)); }
@@ -9993,6 +10093,15 @@ export function createThreeKaleidoscope(){
       swatch.dataset.end = bm.data.colorEnd;
       swatch.title = bm.name;
       swatch.style.background = 'linear-gradient(135deg,' + bm.data.colorStart + ',' + bm.data.colorEnd + ')';
+      const rename = document.createElement('button');
+      rename.type = 'button';
+      rename.className = 'bookmark-rename';
+      rename.textContent = '✎';
+      rename.title = 'ブックマーク名を変更: ' + bm.name;
+      rename.addEventListener('click', function(e){
+        e.stopPropagation();
+        renameBookmark('color', idx, renderColorBookmarks);
+      });
       const del = document.createElement('button');
       del.type = 'button';
       del.className = 'bookmark-del';
@@ -10004,6 +10113,7 @@ export function createThreeKaleidoscope(){
         renderColorBookmarks();
       });
       chip.appendChild(swatch);
+      chip.appendChild(rename);
       chip.appendChild(del);
       eqColorBookmarkList.appendChild(chip);
     });
@@ -10014,6 +10124,13 @@ export function createThreeKaleidoscope(){
     if(!name) return;
     addBookmark('color', name, { colorStart: eqStyle.colorStart, colorEnd: eqStyle.colorEnd });
     renderColorBookmarks();
+  });
+  eqColorBookmarkExportBtn.addEventListener('click', function(){ exportBookmarks('color'); });
+  eqColorBookmarkImportInput.addEventListener('change', function(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    importBookmarksFromFile('color', file, sanitizeBookmarkColorData, renderColorBookmarks);
+    eqColorBookmarkImportInput.value = '';
   });
   renderColorBookmarks();
   eqBarCountInput.addEventListener('input', function(){
@@ -10043,6 +10160,15 @@ export function createThreeKaleidoscope(){
       apply.textContent = bm.name;
       apply.title = 'クリックして適用';
       apply.addEventListener('click', function(){ setEqStyle(sanitizeEqStyle(bm.data)); });
+      const rename = document.createElement('button');
+      rename.type = 'button';
+      rename.className = 'bookmark-chip-rename';
+      rename.textContent = '✎';
+      rename.title = 'ブックマーク名を変更';
+      rename.addEventListener('click', function(e){
+        e.stopPropagation();
+        renameBookmark('eq', idx, renderEqBookmarks);
+      });
       const del = document.createElement('button');
       del.type = 'button';
       del.className = 'bookmark-chip-del';
@@ -10054,6 +10180,7 @@ export function createThreeKaleidoscope(){
         renderEqBookmarks();
       });
       chip.appendChild(apply);
+      chip.appendChild(rename);
       chip.appendChild(del);
       eqBookmarkList.appendChild(chip);
     });
@@ -10063,6 +10190,13 @@ export function createThreeKaleidoscope(){
     if(!name) return;
     addBookmark('eq', name, sanitizeEqStyle(eqStyle));
     renderEqBookmarks();
+  });
+  eqBookmarkExportBtn.addEventListener('click', function(){ exportBookmarks('eq'); });
+  eqBookmarkImportInput.addEventListener('change', function(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    importBookmarksFromFile('eq', file, sanitizeEqStyle, renderEqBookmarks);
+    eqBookmarkImportInput.value = '';
   });
   renderEqBookmarks();
 
@@ -10946,6 +11080,15 @@ export function createThreeKaleidoscope(){
       apply.textContent = bm.name;
       apply.title = 'クリックして適用';
       apply.addEventListener('click', function(){ applyFontSettings(bm.data); });
+      const rename = document.createElement('button');
+      rename.type = 'button';
+      rename.className = 'bookmark-chip-rename';
+      rename.textContent = '✎';
+      rename.title = 'ブックマーク名を変更';
+      rename.addEventListener('click', function(e){
+        e.stopPropagation();
+        renameBookmark('font', idx, renderFontBookmarks);
+      });
       const del = document.createElement('button');
       del.type = 'button';
       del.className = 'bookmark-chip-del';
@@ -10957,6 +11100,7 @@ export function createThreeKaleidoscope(){
         renderFontBookmarks();
       });
       chip.appendChild(apply);
+      chip.appendChild(rename);
       chip.appendChild(del);
       fontBookmarkList.appendChild(chip);
     });
@@ -10966,6 +11110,13 @@ export function createThreeKaleidoscope(){
     if(!name) return;
     addBookmark('font', name, getFontSettings());
     renderFontBookmarks();
+  });
+  fontBookmarkExportBtn.addEventListener('click', function(){ exportBookmarks('font'); });
+  fontBookmarkImportInput.addEventListener('change', function(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    importBookmarksFromFile('font', file, null, renderFontBookmarks);
+    fontBookmarkImportInput.value = '';
   });
   renderFontBookmarks();
 
