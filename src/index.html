@@ -345,6 +345,20 @@
   .bg-asset-handle.start{left:-4px;}
   .bg-asset-handle.end{right:-4px;}
   .bg-asset-handle:hover{background:rgba(255,176,32,.4);}
+  /* Marks where a video asset's own playthrough actually ends within a
+     block placed longer than the file's native duration - beyond this
+     point syncBgVideoToAudio() wraps the video back to frame 0, so the
+     shaded/striped region shows "this part is a repeat", and a marker line
+     appears at every subsequent wrap point too. pointer-events:none so
+     these purely-visual overlays never intercept the block's own drag. */
+  .bg-asset-loop-overlay{
+    position:absolute;top:0;bottom:0;pointer-events:none;z-index:0;
+    background-image:repeating-linear-gradient(45deg, rgba(0,0,0,.25) 0, rgba(0,0,0,.25) 3px, transparent 3px, transparent 7px);
+  }
+  .bg-asset-loop-marker{
+    position:absolute;top:0;bottom:0;width:0;border-left:1px dashed rgba(255,255,255,.8);
+    pointer-events:none;z-index:1;
+  }
   .wave-canvas{position:absolute;top:74px;left:0;height:36px;pointer-events:none;}
   .wave-playhead{
     position:absolute;top:0;bottom:0;width:1px;background:var(--danger);
@@ -566,6 +580,7 @@
   }
   .bg-asset-name{flex:1;min-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);}
   .bg-asset-warn{flex:none;color:var(--danger);font-size:10px;}
+  .bg-asset-media-duration{flex:none;color:var(--muted2);font-size:10px;white-space:nowrap;}
   .bg-asset-row-actions{flex:none;display:flex;gap:4px;margin-left:auto;}
   .bg-asset-row-actions button{
     background:none;border:1px solid var(--line);color:var(--muted);border-radius:6px;
@@ -8124,7 +8139,7 @@ export function createThreeKaleidoscope(){
       transitionOut: { type: 'none', duration: 0.6 }
     };
   }
-  const DEFAULT_BG_IMAGE_DURATION_SEC = 5;
+  const DEFAULT_BG_IMAGE_DURATION_SEC = 2;
 
   function sortBgAssets(){
     bgAssets.sort(function(a, b){ return a.start - b.start; });
@@ -8152,6 +8167,7 @@ export function createThreeKaleidoscope(){
     probe.muted = true;
     probe.src = URL.createObjectURL(asset.file);
     probe.addEventListener('loadeddata', function(){
+      if(probe.duration && isFinite(probe.duration)) asset.mediaDuration = probe.duration;
       try {
         const cw = 96, ch = 96;
         const vw = probe.videoWidth || 1, vh = probe.videoHeight || 1;
@@ -8166,6 +8182,7 @@ export function createThreeKaleidoscope(){
       }
       URL.revokeObjectURL(probe.src);
       renderBgAssetList();
+      renderBgAssetTrack();
     }, { once: true });
     probe.load();
   }
@@ -8177,8 +8194,8 @@ export function createThreeKaleidoscope(){
       : 0;
     const asset = {
       id: genBgAssetId(), kind: kind, file: file,
-      start: Math.round(start * 100) / 100,
-      end: Math.round((start + DEFAULT_BG_IMAGE_DURATION_SEC) * 100) / 100,
+      start: Math.round(start * 1000) / 1000,
+      end: Math.round((start + DEFAULT_BG_IMAGE_DURATION_SEC) * 1000) / 1000,
       settings: makeDefaultBgAssetSettings(),
       thumbUrl: null
     };
@@ -8202,9 +8219,17 @@ export function createThreeKaleidoscope(){
         const dur = probe.duration;
         URL.revokeObjectURL(probe.src);
         if(!dur || !isFinite(dur)) return;
+        asset.mediaDuration = dur;
         const songDur = waveformDurationSec();
-        const maxEnd = songDur > 0 ? asset.start + Math.min(dur, Math.max(0.1, songDur - asset.start)) : asset.start + dur;
-        asset.end = Math.round(maxEnd * 100) / 100;
+        let maxEnd = songDur > 0 ? asset.start + Math.min(dur, Math.max(0.1, songDur - asset.start)) : asset.start + dur;
+        // This resolves asynchronously, after later files in the same
+        // multi-select batch may have already been placed immediately
+        // after this asset's still-provisional (DEFAULT_BG_IMAGE_DURATION_SEC)
+        // end - clamp to whatever asset already claimed the following slot
+        // so the real duration can never retroactively create an overlap.
+        const neighbors = bgAssetNeighbors(asset);
+        if(neighbors.next) maxEnd = Math.min(maxEnd, neighbors.next.start);
+        asset.end = Math.round(maxEnd * 1000) / 1000;
         renderBgAssetList();
         renderBgAssetTrack();
         updateSaveEnabled();
@@ -8278,83 +8303,124 @@ export function createThreeKaleidoscope(){
     return m + ':' + (s < 10 ? '0' : '') + s.toFixed(1);
   }
 
-  // Plain seconds, for the editable numeric time inputs (formatBgTime()'s
-  // m:ss.d form is for the read-only display elsewhere, e.g. the timeline
-  // block label - a bare number is simpler to type/edit directly).
-  function formatBgSeconds(sec){
-    return String(Math.round(sec * 100) / 100);
-  }
-
   function refreshBgAssetRowRangeLabel(asset){
     const row = bgAssetList.querySelector('[data-bg-asset-id="' + asset.id + '"]');
     if(!row) return;
     const inputs = row.querySelectorAll('.bg-asset-time-input');
-    if(inputs[0]) inputs[0].value = formatBgSeconds(asset.start);
-    if(inputs[1]) inputs[1].value = asset.end === null ? '' : formatBgSeconds(asset.end);
+    if(inputs[0]) inputs[0].value = secToDisplay(asset.start);
+    if(inputs[1]) inputs[1].value = asset.end === null ? '' : secToDisplay(asset.end);
   }
 
-  // Editable start/end time inputs for the asset row head, synced
-  // bidirectionally with timeline drags via refreshBgAssetRowRangeLabel()
-  // above (same relationship as the lyric table's numeric inputs <->
-  // waveform drag in C-1). Plain-seconds text, matching the audio trim/fade
-  // inputs' validation style (parseFloat + clamp) rather than the lyric
-  // table's full hh:mm:ss,mmm SRT format, since these values are typically
-  // small/simple offsets into the song.
+  const BG_ASSET_TIME_STEP_SEC = 0.1;
+
+  // Same look/feel as the lyric table's makeTimeInput() (hh:mm:ss.mmm text +
+  // ▲▼ steppers, via the same .time-input/.time-stepper styling and
+  // secToDisplay()/srtToSec() formatting - srtToSec() already supports up
+  // to millisecond/3-decimal precision) - kept as a separate function
+  // rather than shared with makeTimeInput(), same reasoning as the drag
+  // functions above: background assets clamp against neighbors, lyric
+  // lines don't.
+  function buildBgAssetTimeField(asset, field){
+    const wrap = document.createElement('div');
+    wrap.className = 'time-input-wrap bg-asset-time-input-wrap';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'time-input bg-asset-time-input';
+    input.placeholder = field === 'end' ? '（曲の終わりまで）' : '00:00:00.000';
+    input.value = asset[field] === null ? '' : secToDisplay(asset[field]);
+    input.title = field === 'end'
+      ? '終了時間（空欄＝曲の終わりまで。次の素材が隣接している場合は指定不可）'
+      : '開始時間';
+
+    function commit(sec){
+      commitBgAssetTime(asset, field, sec);
+      input.value = asset[field] === null ? '' : secToDisplay(asset[field]);
+      input.classList.remove('invalid');
+      refreshBgAssetBlock(asset);
+      renderBgAssetList();
+      updateActiveBgAsset(true);
+    }
+
+    function step(delta){
+      const base = asset[field] === null ? 0 : asset[field];
+      commit(Math.max(0, Math.round((base + delta) * 1000) / 1000));
+    }
+
+    input.addEventListener('change', function(){
+      const val = input.value.trim();
+      if(val === ''){
+        if(field === 'end'){
+          // Open-ended is only meaningful with nothing directly following.
+          const neighbors = bgAssetNeighbors(asset);
+          if(!neighbors.next){
+            asset.end = null;
+            updateSaveEnabled(); scheduleSaveSession();
+            refreshBgAssetBlock(asset); renderBgAssetList(); updateActiveBgAsset(true);
+            return;
+          }
+        }
+        input.value = asset[field] === null ? '' : secToDisplay(asset[field]);
+        return;
+      }
+      const sec = srtToSec(val);
+      if(sec === null){ input.classList.add('invalid'); return; }
+      commit(sec);
+    });
+
+    input.addEventListener('keydown', function(ev){
+      if(ev.key === 'ArrowUp'){ ev.preventDefault(); step(ev.shiftKey ? 1 : BG_ASSET_TIME_STEP_SEC); }
+      else if(ev.key === 'ArrowDown'){ ev.preventDefault(); step(ev.shiftKey ? -1 : -BG_ASSET_TIME_STEP_SEC); }
+    });
+    // No wheel-scroll-to-adjust - same reasoning as the lyric table's time
+    // inputs, avoids accidental edits while scrolling a long asset list
+    // with the cursor incidentally over one of these fields.
+    input.addEventListener('wheel', function(ev){ ev.stopPropagation(); }, { passive: true });
+
+    wrap.appendChild(input);
+
+    const stepper = document.createElement('div');
+    stepper.className = 'time-stepper';
+    const upBtn = document.createElement('button');
+    upBtn.type = 'button'; upBtn.className = 'time-step-btn'; upBtn.textContent = '▲';
+    upBtn.title = '+0.1秒（Shift+↑キーで1秒）';
+    const downBtn = document.createElement('button');
+    downBtn.type = 'button'; downBtn.className = 'time-step-btn'; downBtn.textContent = '▼';
+    downBtn.title = '-0.1秒（Shift+↓キーで1秒）';
+
+    function attachRepeat(btn, delta){
+      let startTimer = null, repeatTimer = null;
+      function stop(){
+        if(startTimer){ clearTimeout(startTimer); startTimer = null; }
+        if(repeatTimer){ clearInterval(repeatTimer); repeatTimer = null; }
+      }
+      btn.addEventListener('pointerdown', function(ev){
+        ev.preventDefault();
+        step(delta);
+        startTimer = setTimeout(function(){
+          repeatTimer = setInterval(function(){ step(delta); }, 90);
+        }, 400);
+      });
+      ['pointerup','pointerleave','pointercancel'].forEach(function(evName){ btn.addEventListener(evName, stop); });
+    }
+    attachRepeat(upBtn, BG_ASSET_TIME_STEP_SEC);
+    attachRepeat(downBtn, -BG_ASSET_TIME_STEP_SEC);
+    stepper.appendChild(upBtn);
+    stepper.appendChild(downBtn);
+    wrap.appendChild(stepper);
+
+    return wrap;
+  }
+
   function buildBgAssetTimeInputs(asset){
     const wrap = document.createElement('span');
     wrap.className = 'bg-asset-range-inputs';
-
-    const startInput = document.createElement('input');
-    startInput.type = 'text';
-    startInput.className = 'bg-asset-time-input';
-    startInput.value = formatBgSeconds(asset.start);
-    startInput.title = '開始時間（秒）';
-
     const dash = document.createElement('span');
     dash.className = 'bg-asset-range-dash';
     dash.textContent = '–';
-
-    const endInput = document.createElement('input');
-    endInput.type = 'text';
-    endInput.className = 'bg-asset-time-input';
-    endInput.value = asset.end === null ? '' : formatBgSeconds(asset.end);
-    endInput.placeholder = '∞';
-    endInput.title = '終了時間（秒、空欄＝曲の終わりまで。次の素材が隣接している場合は指定不可）';
-
-    function afterCommit(){
-      refreshBgAssetBlock(asset);
-      renderBgAssetList();
-      renderBgAssetTrack();
-      updateActiveBgAsset(true);
-    }
-    startInput.addEventListener('change', function(){
-      const v = parseFloat(startInput.value);
-      if(isFinite(v)) commitBgAssetTime(asset, 'start', v);
-      afterCommit();
-    });
-    endInput.addEventListener('change', function(){
-      const raw = endInput.value.trim();
-      if(raw === ''){
-        // Open-ended is only meaningful with nothing directly following.
-        const neighbors = bgAssetNeighbors(asset);
-        if(!neighbors.next){ asset.end = null; updateSaveEnabled(); scheduleSaveSession(); }
-      } else {
-        const v = parseFloat(raw);
-        if(isFinite(v)) commitBgAssetTime(asset, 'end', v);
-      }
-      afterCommit();
-    });
-    // Same reasoning as the lyric table's time inputs (10.4-ish, see
-    // makeTimeInput): no wheel-scroll-to-adjust, it causes accidental edits
-    // while scrolling a long asset list with the cursor incidentally over
-    // one of these fields.
-    [startInput, endInput].forEach(function(inp){
-      inp.addEventListener('wheel', function(ev){ ev.stopPropagation(); }, { passive: true });
-    });
-
-    wrap.appendChild(startInput);
+    wrap.appendChild(buildBgAssetTimeField(asset, 'start'));
     wrap.appendChild(dash);
-    wrap.appendChild(endInput);
+    wrap.appendChild(buildBgAssetTimeField(asset, 'end'));
     return wrap;
   }
 
@@ -8379,8 +8445,8 @@ export function createThreeKaleidoscope(){
       let cursor = anchor;
       bgAssets.forEach(function(a){
         const duration = a.end - a.start;
-        a.start = Math.round(cursor * 100) / 100;
-        a.end = Math.round((cursor + duration) * 100) / 100;
+        a.start = Math.round(cursor * 1000) / 1000;
+        a.end = Math.round((cursor + duration) * 1000) / 1000;
         cursor = a.end;
       });
     }
@@ -8573,6 +8639,14 @@ export function createThreeKaleidoscope(){
       name.textContent = asset.file.name;
       name.title = asset.file.name;
       head.appendChild(name);
+
+      if(asset.kind === 'video' && asset.mediaDuration){
+        const mediaDur = document.createElement('span');
+        mediaDur.className = 'bg-asset-media-duration';
+        mediaDur.textContent = '動画の長さ: ' + formatBgTime(asset.mediaDuration);
+        mediaDur.title = 'この動画ファイル自体の長さ（配置区間の長さとは別）';
+        head.appendChild(mediaDur);
+      }
 
       head.appendChild(buildBgAssetTimeInputs(asset));
 
@@ -11787,6 +11861,23 @@ export function createThreeKaleidoscope(){
     return pad(h,2)+':'+pad(m,2)+':'+pad(s,2)+','+pad(ms,3);
   }
 
+  // Display-only variant of secToSrt() - a period instead of a comma before
+  // the milliseconds, used for on-screen table/panel time inputs (the
+  // lyric table and the B-1 background-asset rows). Actual .srt file
+  // read/write always goes through secToSrt()/srtToSec() so exported files
+  // keep the comma the SRT spec requires; srtToSec() already accepts either
+  // separator (`[.,]` in its regex), so typing a period-formatted value
+  // parses back correctly without any extra conversion step.
+  function secToDisplay(sec){
+    if(sec === null || sec === undefined || isNaN(sec)) return '';
+    sec = Math.max(0, sec);
+    let ms = Math.round(sec * 1000);
+    const h = Math.floor(ms / 3600000); ms -= h * 3600000;
+    const m = Math.floor(ms / 60000); ms -= m * 60000;
+    const s = Math.floor(ms / 1000); ms -= s * 1000;
+    return pad(h,2)+':'+pad(m,2)+':'+pad(s,2)+'.'+pad(ms,3);
+  }
+
   function srtToSec(str){
     if(!str) return null;
     str = str.trim();
@@ -12462,7 +12553,7 @@ export function createThreeKaleidoscope(){
     const tr = tbody.querySelector('tr[data-idx="' + i + '"]');
     if(!tr) return;
     const input = tr.querySelector('td.time.' + field + ' input.time-input');
-    if(input){ input.value = secToSrt(line[field]); input.classList.remove('invalid'); }
+    if(input){ input.value = secToDisplay(line[field]); input.classList.remove('invalid'); }
     if(field === 'start'){
       const playBtn = tr.querySelector('.playrow');
       if(playBtn) playBtn.disabled = line.start === null;
@@ -12477,13 +12568,13 @@ export function createThreeKaleidoscope(){
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'time-input';
-    input.placeholder = '00:00:00,000';
-    input.value = secToSrt(line[field]);
+    input.placeholder = '00:00:00.000';
+    input.value = secToDisplay(line[field]);
     if(disabled) input.disabled = true;
 
     function commit(sec){
       commitLineTime(line, field, sec);
-      input.value = secToSrt(sec);
+      input.value = secToDisplay(sec);
       input.classList.remove('invalid');
       if(field === 'start'){
         const tr = input.closest('tr');
@@ -12772,6 +12863,45 @@ export function createThreeKaleidoscope(){
     return { left: start * waveZoomPxPerSec, width: Math.max(4, (end - start) * waveZoomPxPerSec) };
   }
 
+  // Seconds-from-block-start of every point where a video asset's own
+  // playthrough ends and syncBgVideoToAudio() wraps it back to frame 0 (see
+  // that function - it's a plain modulo against the video's own duration).
+  // Empty for images, or for a video asset whose placed duration doesn't
+  // outlast one playthrough.
+  function bgAssetLoopBoundaries(asset){
+    if(asset.kind !== 'video' || !asset.mediaDuration || asset.end === null) return [];
+    const duration = asset.end - asset.start;
+    const boundaries = [];
+    for(let t = asset.mediaDuration; t < duration - 0.02; t += asset.mediaDuration) boundaries.push(t);
+    return boundaries;
+  }
+
+  // (Re)builds the loop-boundary tick marks inside one block and toggles
+  // the "this block loops" styling - shared by the full-rebuild
+  // (renderBgAssetTrack) and cheap-patch (refreshBgAssetBlock) paths so
+  // markers stay correct whether the block was just created or is being
+  // repositioned mid-drag/mid-zoom.
+  function renderBgAssetLoopMarkers(asset, blockEl){
+    blockEl.querySelectorAll('.bg-asset-loop-marker, .bg-asset-loop-overlay').forEach(function(m){ m.remove(); });
+    const boundaries = bgAssetLoopBoundaries(asset);
+    blockEl.classList.toggle('has-loop', boundaries.length > 0);
+    if(boundaries.length){
+      const overlay = document.createElement('div');
+      overlay.className = 'bg-asset-loop-overlay';
+      overlay.style.left = (boundaries[0] * waveZoomPxPerSec) + 'px';
+      overlay.style.right = '0';
+      overlay.title = '動画の実尺（' + formatBgTime(asset.mediaDuration) + '）を超えてループ再生される部分';
+      blockEl.appendChild(overlay);
+    }
+    boundaries.forEach(function(tOffset){
+      const marker = document.createElement('div');
+      marker.className = 'bg-asset-loop-marker';
+      marker.style.left = (tOffset * waveZoomPxPerSec) + 'px';
+      marker.title = 'ここで動画が最初に戻ってループ再生されます';
+      blockEl.appendChild(marker);
+    });
+  }
+
   function refreshBgAssetBlock(asset){
     const el = bgAssetTrackRow.querySelector('[data-bg-asset-id="' + asset.id + '"]');
     if(!el) return;
@@ -12779,6 +12909,7 @@ export function createThreeKaleidoscope(){
     el.style.left = g.left + 'px';
     el.style.width = g.width + 'px';
     el.classList.toggle('open-ended', asset.end === null);
+    renderBgAssetLoopMarkers(asset, el);
   }
 
   function repositionAllBgAssetBlocks(){
@@ -12788,6 +12919,7 @@ export function createThreeKaleidoscope(){
       const g = bgAssetBlockGeometry(asset);
       el.style.left = g.left + 'px';
       el.style.width = g.width + 'px';
+      renderBgAssetLoopMarkers(asset, el);
     });
   }
 
@@ -12810,11 +12942,11 @@ export function createThreeKaleidoscope(){
     if(field === 'start'){
       const min = neighbors.prev ? (neighbors.prev.end === null ? neighbors.prev.start : neighbors.prev.end) : 0;
       const max = asset.end === null ? Infinity : asset.end - 0.1;
-      asset.start = Math.round(clamp(sec, min, max) * 100) / 100;
+      asset.start = Math.round(clamp(sec, min, max) * 1000) / 1000;
     } else {
       const min = asset.start + 0.1;
       const max = neighbors.next ? neighbors.next.start : Infinity;
-      asset.end = Math.round(clamp(sec, min, max) * 100) / 100;
+      asset.end = Math.round(clamp(sec, min, max) * 1000) / 1000;
     }
     updateSaveEnabled();
     scheduleSaveSession();
@@ -12908,6 +13040,7 @@ export function createThreeKaleidoscope(){
       attachBgAssetHandleDrag(startHandle, asset, 'start');
       attachBgAssetHandleDrag(endHandle, asset, 'end');
       attachBgAssetMoveDrag(block, asset);
+      renderBgAssetLoopMarkers(asset, block);
 
       bgAssetTrackRow.appendChild(block);
     });
