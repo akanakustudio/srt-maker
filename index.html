@@ -532,7 +532,17 @@
   .bg-asset-empty-hint.hidden{display:none;}
   .bg-asset-list{display:flex;flex-direction:column;gap:6px;width:100%;}
   .bg-asset-row{border:1px solid var(--line);border-radius:8px;background:var(--panel2);overflow:hidden;}
+  .bg-asset-row.drag-over{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
   .bg-asset-row-head{display:flex;align-items:center;gap:8px;padding:7px 9px;font-size:11.5px;flex-wrap:wrap;}
+  .bg-asset-drag-handle{flex:none;cursor:grab;color:var(--muted2);font-size:14px;line-height:1;padding:0 1px;user-select:none;}
+  .bg-asset-drag-handle:active{cursor:grabbing;}
+  .bg-asset-range-inputs{flex:none;display:flex;align-items:center;gap:3px;}
+  .bg-asset-time-input{
+    width:44px;background:var(--panel);border:1px solid var(--line);color:var(--text);
+    border-radius:5px;padding:3px 4px;font-size:10.5px;font-family:var(--mono);text-align:center;
+  }
+  .bg-asset-time-input:focus{outline:none;border-color:var(--accent-dim);}
+  .bg-asset-range-dash{color:var(--muted2);font-size:10px;}
   .bg-asset-thumb{
     flex:none;width:32px;height:32px;border-radius:5px;object-fit:cover;
     background:var(--panel);border:1px solid var(--line);
@@ -543,7 +553,6 @@
     background:rgba(255,176,32,.18);color:#ffb020;border:1px solid #cf8b1f;
   }
   .bg-asset-name{flex:1;min-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);}
-  .bg-asset-range{flex:none;color:var(--muted2);font-family:var(--mono);font-size:10.5px;}
   .bg-asset-warn{flex:none;color:var(--danger);font-size:10px;}
   .bg-asset-row-actions{flex:none;display:flex;gap:4px;margin-left:auto;}
   .bg-asset-row-actions button{
@@ -680,8 +689,8 @@
   .preview-bg{
     position:absolute;inset:0;z-index:0;
     background-image:radial-gradient(ellipse at center, #1c2129, #14171c 80%);
-    background-size:var(--preview-bg-size, contain);
-    background-position:var(--preview-bg-position, 50% 50%);
+    background-size:contain;
+    background-position:50% 50%;
     background-repeat:no-repeat;
     background-color:#14171c;
     transition:background-image .2s ease;
@@ -691,6 +700,17 @@
   }
   .preview-bg.has-image::after{background:rgba(8,10,13,.48);}
   .preview-bg-video{position:absolute;top:0;left:0;object-fit:fill;}
+  /* B-3: transition preview layers, stacked above the normal (layer A)
+     background. Layer B previews the "incoming" asset and fades in via
+     opacity (driven by applyBgTransitionFrame()); the solid color layer is
+     used only by the fade-black/fade-white transition types. Both start
+     fully transparent/hidden and are pointer-events:none so they never
+     interfere with normal interaction with the stage underneath. */
+  .preview-bg-incoming{z-index:0;opacity:0;pointer-events:none;}
+  .preview-bg-incoming::after{display:none;}
+  .preview-bg-fade-color{
+    position:absolute;inset:0;z-index:0;opacity:0;pointer-events:none;background:#000;
+  }
   .preview-eq{position:absolute;inset:0;z-index:1;width:100%;height:100%;pointer-events:none;display:block;}
 
   .preview-single{
@@ -904,6 +924,10 @@
           <div class="preview-bg" id="previewBg">
             <video class="preview-bg-video" id="previewBgVideo" muted loop playsinline style="display:none"></video>
           </div>
+          <div class="preview-bg preview-bg-incoming" id="previewBgB">
+            <video class="preview-bg-video" id="previewBgVideoB" muted loop playsinline style="display:none"></video>
+          </div>
+          <div class="preview-bg-fade-color" id="previewBgFadeColor"></div>
           <canvas class="preview-eq" id="previewEqCanvas"></canvas>
           <div class="preview-single" id="previewSingle">
             <div class="preview-single-text is-empty" id="previewSingleText"></div>
@@ -7355,6 +7379,9 @@ export function createThreeKaleidoscope(){
   const previewBgClearBtn = document.getElementById('previewBgClearBtn');
   const previewBgVisibleToggle = document.getElementById('previewBgVisibleToggle');
   const previewBgVideo = document.getElementById('previewBgVideo');
+  const previewBgB = document.getElementById('previewBgB');
+  const previewBgVideoB = document.getElementById('previewBgVideoB');
+  const previewBgFadeColor = document.getElementById('previewBgFadeColor');
   const bgAssetList = document.getElementById('bgAssetList');
   const bgAssetEmptyHint = document.getElementById('bgAssetEmptyHint');
   const bgAssetTrackRow = document.getElementById('bgAssetTrackRow');
@@ -7699,30 +7726,38 @@ export function createThreeKaleidoscope(){
     return bgAssets.find(function(a){ return a.id === activeBgAssetId; }) || null;
   }
 
-  function applyBgVideoLayout(){
-    const asset = getActiveBgAssetObj();
+  // Layer-parameterized versions - B-3's transition preview needs a second,
+  // independent background layer (previewBgB/previewBgVideoB) showing the
+  // "incoming" asset with its own settings while layer A (previewBg/
+  // previewBgVideo) keeps showing the "outgoing" asset, so these can no
+  // longer hard-code which element they act on. Each layer's size/position
+  // used to go through shared CSS custom properties on <html> (--preview-bg-
+  // size/-position) - that only ever worked for a single layer, so this now
+  // sets each layer's own inline background-size/-position instead.
+  function applyBgVideoLayoutFor(videoEl, asset){
     if(!asset || asset.kind !== 'video') return;
-    const iw = previewBgVideo.videoWidth, ih = previewBgVideo.videoHeight;
+    const iw = videoEl.videoWidth, ih = videoEl.videoHeight;
     if(!iw || !ih) return;
     const stageRect = previewStage.getBoundingClientRect();
     const w = stageRect.width, h = stageRect.height;
     if(!w || !h) return;
     const s = asset.settings;
     const rect = computeBgDrawRect(w, h, iw, ih, s.sizeMode, s.zoom, s.posX, s.posY, 1);
-    previewBgVideo.style.width = rect.w + 'px';
-    previewBgVideo.style.height = rect.h + 'px';
-    previewBgVideo.style.left = rect.x + 'px';
-    previewBgVideo.style.top = rect.y + 'px';
+    videoEl.style.width = rect.w + 'px';
+    videoEl.style.height = rect.h + 'px';
+    videoEl.style.left = rect.x + 'px';
+    videoEl.style.top = rect.y + 'px';
+  }
+  function applyBgVideoLayout(){
+    applyBgVideoLayoutFor(previewBgVideo, getActiveBgAssetObj());
   }
 
-  // Sets the CSS custom properties the on-screen image path reads
-  // (previewBg's background-size/-position) from one asset's settings, or
-  // resets them when no asset is active. asset=null is a valid, common call
-  // (e.g. a gap in the timeline with nothing covering the current time).
-  function applyBgTransformForAsset(asset){
+  // asset=null is a valid, common call (e.g. a gap in the timeline with
+  // nothing covering the current time, or layer B when no transition is active).
+  function applyBgTransformFor(bgEl, videoEl, asset){
     if(!asset){
-      document.documentElement.style.setProperty('--preview-bg-size', 'contain');
-      document.documentElement.style.setProperty('--preview-bg-position', '50% 50%');
+      bgEl.style.backgroundSize = 'contain';
+      bgEl.style.backgroundPosition = '50% 50%';
       return;
     }
     const s = asset.settings;
@@ -7733,13 +7768,19 @@ export function createThreeKaleidoscope(){
       case 'zoom': sizeValue = s.zoom + '% auto'; break;
       default: sizeValue = 'contain';
     }
-    document.documentElement.style.setProperty('--preview-bg-size', sizeValue);
-    document.documentElement.style.setProperty('--preview-bg-position', s.posX + '% ' + s.posY + '%');
-    applyBgVideoLayout();
+    bgEl.style.backgroundSize = sizeValue;
+    bgEl.style.backgroundPosition = s.posX + '% ' + s.posY + '%';
+    applyBgVideoLayoutFor(videoEl, asset);
+  }
+  function applyBgTransformForAsset(asset){
+    applyBgTransformFor(previewBg, previewBgVideo, asset);
   }
 
+  function applyBgOpacityFor(bgEl, asset){
+    bgEl.style.opacity = asset ? asset.settings.opacity : 1;
+  }
   function applyBgOpacityForAsset(asset){
-    previewBg.style.opacity = asset ? asset.settings.opacity : 1;
+    applyBgOpacityFor(previewBg, asset);
   }
 
   function applyBgVisibility(){
@@ -7753,8 +7794,12 @@ export function createThreeKaleidoscope(){
   });
   applyBgVisibility();
   previewBgVideo.addEventListener('loadedmetadata', applyBgVideoLayout);
+  function refreshAllBgVideoLayouts(){
+    applyBgVideoLayout();
+    if(bgTransitionToAsset) applyBgVideoLayoutFor(previewBgVideoB, bgTransitionToAsset);
+  }
   if(typeof ResizeObserver !== 'undefined'){
-    new ResizeObserver(applyBgVideoLayout).observe(previewStage);
+    new ResizeObserver(refreshAllBgVideoLayouts).observe(previewStage);
   }
 
   // Font size (and stroke/shadow/mask sizing) is authored in px against the
@@ -7837,8 +7882,12 @@ export function createThreeKaleidoscope(){
   function bgVideoFadeLoop(){
     bgVideoFadeRAF = requestAnimationFrame(bgVideoFadeLoop);
     const asset = getActiveBgAssetObj();
-    if(!asset || asset.kind !== 'video'){ previewBgVideo.style.opacity = ''; return; }
-    previewBgVideo.style.opacity = getBgVideoLoopAlpha(asset);
+    if(!asset || asset.kind !== 'video') previewBgVideo.style.opacity = '';
+    else previewBgVideo.style.opacity = getBgVideoLoopAlpha(asset);
+    // Driven from this same continuous rAF loop (not just audioEl's
+    // timeupdate, which some browsers throttle to ~250ms) so the
+    // crossfade/dissolve/fade-color opacity animates smoothly frame to frame.
+    applyBgTransitionFrame();
   }
   bgVideoFadeRAF = requestAnimationFrame(bgVideoFadeLoop);
 
@@ -7926,11 +7975,123 @@ export function createThreeKaleidoscope(){
     applyBgOpacityForAsset(asset);
   }
 
+  /* -------- B-3: transitions between adjacent background assets -------- */
+  // A transition only ever applies at a boundary between two assets that
+  // are directly adjacent (no gap: next.start === a.end) - a gap already
+  // has its own well-defined "nothing showing" behavior (see
+  // getBgDrawSource()) that a transition would only confuse. Returns null
+  // outside any transition window.
+  function getBgTransitionState(t){
+    if(t === undefined) t = audioEl.currentTime;
+    for(let i = 0; i < bgAssets.length; i++){
+      const a = bgAssets[i];
+      if(a.end === null) continue;
+      const trans = a.settings.transitionOut;
+      if(!trans || trans.type === 'none') continue;
+      const next = bgAssets[i + 1];
+      if(!next || next.start !== a.end) continue;
+      const dur = Math.max(0.05, trans.duration || 0.6);
+      const winStart = a.end - dur;
+      if(t >= winStart && t < a.end){
+        return { from: a, to: next, type: trans.type, progress: clamp((t - winStart) / dur, 0, 1) };
+      }
+    }
+    return null;
+  }
+
+  // How far layer B (the incoming asset) has faded in, as a function of
+  // transition progress (0..1). Crossfade/fade-black/fade-white all ramp
+  // linearly so the handoff to "to" being the sole visible layer lands
+  // exactly at progress=1 (matching when getActiveBgAsset() itself flips
+  // over to "to"); dissolve uses a smoothstep ease instead of linear for
+  // the gentler blend the roadmap calls for.
+  function bgTransitionLayerAlpha(type, progress){
+    if(type === 'dissolve') return progress * progress * (3 - 2 * progress);
+    return progress;
+  }
+  // fade-black/fade-white additionally hump a solid color layer over the
+  // *top* of the crossfade, peaking at the midpoint - a "flash through
+  // color while cross-dissolving" read rather than a literal hard cut to
+  // black/white at the midpoint (which would require the active-asset
+  // handoff itself to happen mid-window instead of at the window's end).
+  function bgTransitionColorAlpha(progress){
+    return 1 - Math.abs(progress * 2 - 1);
+  }
+
+  function clearPreviewBgVideoB(){
+    previewBgVideoB.pause();
+    previewBgVideoB.removeAttribute('src');
+    previewBgVideoB.load();
+    previewBgVideoB.style.display = 'none';
+  }
+
+  // Points layer B at whichever asset is about to become active, reusing
+  // the same bgRuntime cache layer A uses (the asset will likely become
+  // the primary active asset moments later anyway, so there's no benefit
+  // to decoding it twice). Video assets preview from their own frame 0
+  // (not actually playing) during the transition - true pre-roll playback
+  // would need the video already advancing before its official start time,
+  // which is deferred as a possible future refinement.
+  function activateBgLayerB(asset){
+    clearPreviewBgVideoB();
+    previewBgB.classList.remove('has-image');
+    previewBgB.style.backgroundImage = '';
+    if(!asset) return;
+    let rt = bgRuntime.get(asset.id);
+    if(!rt){ rt = { url: URL.createObjectURL(asset.file), imageEl: null }; bgRuntime.set(asset.id, rt); }
+    if(asset.kind === 'video'){
+      previewBgVideoB.style.display = 'block';
+      previewBgVideoB.src = rt.url;
+      previewBgVideoB.load();
+      previewBgVideoB.addEventListener('loadedmetadata', function(){
+        previewBgVideoB.currentTime = 0;
+        applyBgVideoLayoutFor(previewBgVideoB, asset);
+      }, { once: true });
+    } else {
+      previewBgB.style.backgroundImage = 'url(' + rt.url + ')';
+      if(!rt.imageEl) decodeBgAssetImage(asset, rt);
+    }
+    previewBgB.classList.add('has-image');
+    applyBgTransformFor(previewBgB, previewBgVideoB, asset);
+    applyBgOpacityFor(previewBgB, asset);
+  }
+
+  let bgTransitionToAsset = null; // whichever asset layer B currently previews, or null outside a transition
+  function applyBgTransitionFrame(){
+    const state = getBgTransitionState();
+    if(!state){
+      if(bgTransitionToAsset !== null){
+        bgTransitionToAsset = null;
+        previewBgB.style.opacity = 0;
+        clearPreviewBgVideoB();
+      }
+      previewBgFadeColor.style.opacity = 0;
+      return;
+    }
+    if(!bgTransitionToAsset || bgTransitionToAsset.id !== state.to.id){
+      bgTransitionToAsset = state.to;
+      activateBgLayerB(state.to);
+    }
+    previewBgB.style.opacity = bgTransitionLayerAlpha(state.type, state.progress);
+    if(state.type === 'fadeBlack' || state.type === 'fadeWhite'){
+      previewBgFadeColor.style.background = state.type === 'fadeBlack' ? '#000' : '#fff';
+      previewBgFadeColor.style.opacity = bgTransitionColorAlpha(state.progress);
+    } else {
+      previewBgFadeColor.style.opacity = 0;
+    }
+  }
+
   function genBgAssetId(){
     return 'bg_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
   }
   function makeDefaultBgAssetSettings(){
-    return { sizeMode: 'contain', zoom: 100, posX: 50, posY: 50, opacity: 1, loopEffect: 'none', loopFadeDuration: 0.5 };
+    return {
+      sizeMode: 'contain', zoom: 100, posX: 50, posY: 50, opacity: 1, loopEffect: 'none', loopFadeDuration: 0.5,
+      // "How this asset hands off to whichever asset immediately follows it"
+      // (B-3) - only has a visible effect when the next asset starts exactly
+      // where this one ends (no gap); see getBgTransitionState().
+      transitionOut: { type: 'none', duration: 0.6 }
+    };
   }
   const DEFAULT_BG_IMAGE_DURATION_SEC = 5;
 
@@ -8086,11 +8247,132 @@ export function createThreeKaleidoscope(){
     return m + ':' + (s < 10 ? '0' : '') + s.toFixed(1);
   }
 
+  // Plain seconds, for the editable numeric time inputs (formatBgTime()'s
+  // m:ss.d form is for the read-only display elsewhere, e.g. the timeline
+  // block label - a bare number is simpler to type/edit directly).
+  function formatBgSeconds(sec){
+    return String(Math.round(sec * 100) / 100);
+  }
+
   function refreshBgAssetRowRangeLabel(asset){
     const row = bgAssetList.querySelector('[data-bg-asset-id="' + asset.id + '"]');
     if(!row) return;
-    const range = row.querySelector('.bg-asset-range');
-    if(range) range.textContent = formatBgTime(asset.start) + ' – ' + (asset.end === null ? '∞' : formatBgTime(asset.end));
+    const inputs = row.querySelectorAll('.bg-asset-time-input');
+    if(inputs[0]) inputs[0].value = formatBgSeconds(asset.start);
+    if(inputs[1]) inputs[1].value = asset.end === null ? '' : formatBgSeconds(asset.end);
+  }
+
+  // Editable start/end time inputs for the asset row head, synced
+  // bidirectionally with timeline drags via refreshBgAssetRowRangeLabel()
+  // above (same relationship as the lyric table's numeric inputs <->
+  // waveform drag in C-1). Plain-seconds text, matching the audio trim/fade
+  // inputs' validation style (parseFloat + clamp) rather than the lyric
+  // table's full hh:mm:ss,mmm SRT format, since these values are typically
+  // small/simple offsets into the song.
+  function buildBgAssetTimeInputs(asset){
+    const wrap = document.createElement('span');
+    wrap.className = 'bg-asset-range-inputs';
+
+    const startInput = document.createElement('input');
+    startInput.type = 'text';
+    startInput.className = 'bg-asset-time-input';
+    startInput.value = formatBgSeconds(asset.start);
+    startInput.title = '開始時間（秒）';
+
+    const dash = document.createElement('span');
+    dash.className = 'bg-asset-range-dash';
+    dash.textContent = '–';
+
+    const endInput = document.createElement('input');
+    endInput.type = 'text';
+    endInput.className = 'bg-asset-time-input';
+    endInput.value = asset.end === null ? '' : formatBgSeconds(asset.end);
+    endInput.placeholder = '∞';
+    endInput.title = '終了時間（秒、空欄＝曲の終わりまで。次の素材が隣接している場合は指定不可）';
+
+    function afterCommit(){
+      refreshBgAssetBlock(asset);
+      renderBgAssetList();
+      renderBgAssetTrack();
+      updateActiveBgAsset(true);
+    }
+    startInput.addEventListener('change', function(){
+      const v = parseFloat(startInput.value);
+      if(isFinite(v)) commitBgAssetTime(asset, 'start', v);
+      afterCommit();
+    });
+    endInput.addEventListener('change', function(){
+      const raw = endInput.value.trim();
+      if(raw === ''){
+        // Open-ended is only meaningful with nothing directly following.
+        const neighbors = bgAssetNeighbors(asset);
+        if(!neighbors.next){ asset.end = null; updateSaveEnabled(); scheduleSaveSession(); }
+      } else {
+        const v = parseFloat(raw);
+        if(isFinite(v)) commitBgAssetTime(asset, 'end', v);
+      }
+      afterCommit();
+    });
+    // Same reasoning as the lyric table's time inputs (10.4-ish, see
+    // makeTimeInput): no wheel-scroll-to-adjust, it causes accidental edits
+    // while scrolling a long asset list with the cursor incidentally over
+    // one of these fields.
+    [startInput, endInput].forEach(function(inp){
+      inp.addEventListener('wheel', function(ev){ ev.stopPropagation(); }, { passive: true });
+    });
+
+    wrap.appendChild(startInput);
+    wrap.appendChild(dash);
+    wrap.appendChild(endInput);
+    return wrap;
+  }
+
+  // List-order drag-and-drop -> resequences bgAssets' actual start/end times
+  // to match the new order (each asset keeps its own duration; only *which
+  // slot* it occupies changes) rather than just reordering their display -
+  // display order and chronological order must stay identical since assets
+  // never overlap, so "reorder the list" can only sensibly mean "renumber
+  // the slots". No-ops if any asset is open-ended (no fixed duration to
+  // preserve) - in practice that's only ever a single legacy-migrated asset,
+  // never alongside a second asset there'd be any reason to reorder against.
+  let bgAssetDragSourceId = null;
+  function reorderBgAsset(draggedId, targetId){
+    if(draggedId === targetId) return;
+    const fromIdx = bgAssets.findIndex(function(a){ return a.id === draggedId; });
+    const toIdx = bgAssets.findIndex(function(a){ return a.id === targetId; });
+    if(fromIdx === -1 || toIdx === -1) return;
+    const anchor = bgAssets.length ? bgAssets[0].start : 0;
+    const moved = bgAssets.splice(fromIdx, 1)[0];
+    bgAssets.splice(toIdx, 0, moved);
+    if(!bgAssets.some(function(a){ return a.end === null; })){
+      let cursor = anchor;
+      bgAssets.forEach(function(a){
+        const duration = a.end - a.start;
+        a.start = Math.round(cursor * 100) / 100;
+        a.end = Math.round((cursor + duration) * 100) / 100;
+        cursor = a.end;
+      });
+    }
+    renderBgAssetList();
+    renderBgAssetTrack();
+    updateActiveBgAsset(true);
+    updateSaveEnabled();
+    scheduleSaveSession();
+  }
+
+  function attachBgAssetRowReorderDrag(row, asset){
+    row.addEventListener('dragover', function(ev){
+      if(!bgAssetDragSourceId || bgAssetDragSourceId === asset.id) return;
+      ev.preventDefault();
+      row.classList.add('drag-over');
+    });
+    row.addEventListener('dragleave', function(){ row.classList.remove('drag-over'); });
+    row.addEventListener('drop', function(ev){
+      ev.preventDefault();
+      row.classList.remove('drag-over');
+      if(bgAssetDragSourceId) reorderBgAsset(bgAssetDragSourceId, asset.id);
+      bgAssetDragSourceId = null;
+    });
   }
 
   function buildBgAssetRowBody(asset){
@@ -8172,6 +8454,32 @@ export function createThreeKaleidoscope(){
       }));
     }
 
+    const neighbors = bgAssetNeighbors(asset);
+    const hasAdjacentNext = !!(neighbors.next && asset.end !== null && neighbors.next.start === asset.end);
+    const transitionOut = asset.settings.transitionOut || { type: 'none', duration: 0.6 };
+
+    const transLabel = document.createElement('label');
+    transLabel.className = 'preview-control';
+    if(!hasAdjacentNext) transLabel.title = '次の素材が隙間なく続いている場合のみ効果があります';
+    const transSpan = document.createElement('span'); transSpan.textContent = '次の素材への切り替え';
+    const transSelect = document.createElement('select');
+    [['none','カット（切り替えなし）'],['crossfade','クロスフェード'],['dissolve','ディゾルブ'],['fadeBlack','フェード（暗転）'],['fadeWhite','フェード（明転）']].forEach(function(opt){
+      const o = document.createElement('option'); o.value = opt[0]; o.textContent = opt[1];
+      if(transitionOut.type === opt[0]) o.selected = true;
+      transSelect.appendChild(o);
+    });
+    transSelect.addEventListener('change', function(){
+      asset.settings.transitionOut.type = transSelect.value;
+      scheduleSaveSession();
+    });
+    transLabel.appendChild(transSpan); transLabel.appendChild(transSelect);
+    body.appendChild(transLabel);
+
+    body.appendChild(makeRangeControl('切り替え時間(秒)', 0.1, 3, 0.1, transitionOut.duration, function(v){
+      asset.settings.transitionOut.duration = v;
+      scheduleSaveSession();
+    }));
+
     return body;
   }
 
@@ -8192,9 +8500,25 @@ export function createThreeKaleidoscope(){
       row.className = 'bg-asset-row';
       row.dataset.bgAssetId = asset.id;
       if(expandedBgAssetId === asset.id) row.classList.add('expanded');
+      attachBgAssetRowReorderDrag(row, asset);
 
       const head = document.createElement('div');
       head.className = 'bg-asset-row-head';
+
+      const dragHandle = document.createElement('span');
+      dragHandle.className = 'bg-asset-drag-handle';
+      dragHandle.textContent = '⠿';
+      dragHandle.title = 'ドラッグして並び順を変更（各素材の長さを保ったまま順序を入れ替えます）';
+      dragHandle.draggable = true;
+      dragHandle.addEventListener('dragstart', function(ev){
+        bgAssetDragSourceId = asset.id;
+        if(ev.dataTransfer){ ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', asset.id); }
+      });
+      dragHandle.addEventListener('dragend', function(){
+        bgAssetDragSourceId = null;
+        bgAssetList.querySelectorAll('.bg-asset-row.drag-over').forEach(function(el){ el.classList.remove('drag-over'); });
+      });
+      head.appendChild(dragHandle);
 
       if(asset.thumbUrl){
         const thumb = document.createElement('img');
@@ -8219,10 +8543,7 @@ export function createThreeKaleidoscope(){
       name.title = asset.file.name;
       head.appendChild(name);
 
-      const range = document.createElement('span');
-      range.className = 'bg-asset-range';
-      range.textContent = formatBgTime(asset.start) + ' – ' + (asset.end === null ? '∞' : formatBgTime(asset.end));
-      head.appendChild(range);
+      head.appendChild(buildBgAssetTimeInputs(asset));
 
       if(songDur > 0 && asset.start > songDur){
         const warn = document.createElement('span');
@@ -10771,13 +11092,15 @@ export function createThreeKaleidoscope(){
     return lines;
   }
 
-  function getBgDrawSource(){
-    if(!bgVisible) return null;
-    const asset = getActiveBgAsset();
+  // Generalized over which asset/video element - the transition-aware
+  // drawCanvasBackground() below needs to pull a draw source for the
+  // "incoming" asset (previewBgVideoB) exactly the same way it does for the
+  // normally-active one (previewBgVideo), so this no longer assumes "the"
+  // single active asset/video.
+  function getBgDrawSourceFor(asset, videoEl){
     if(!asset) return null;
     if(asset.kind === 'video'){
-      const v = previewBgVideo;
-      if(v.readyState >= 2 && v.videoWidth) return { el: v, w: v.videoWidth, h: v.videoHeight, asset: asset };
+      if(videoEl.readyState >= 2 && videoEl.videoWidth) return { el: videoEl, w: videoEl.videoWidth, h: videoEl.videoHeight, asset: asset };
       return null;
     }
     const rt = bgRuntime.get(asset.id);
@@ -10788,27 +11111,29 @@ export function createThreeKaleidoscope(){
     if(!ready) return null;
     return { el: img, w: isBitmap ? img.width : img.naturalWidth, h: isBitmap ? img.height : img.naturalHeight, asset: asset };
   }
+  function getBgDrawSource(){
+    if(!bgVisible) return null;
+    return getBgDrawSourceFor(getActiveBgAsset(), previewBgVideo);
+  }
 
-  function drawCanvasBackground(ctx, w, h, scale){
-    scale = scale || 1;
-    ctx.fillStyle = '#14171c';
+  function drawBgPlaceholder(ctx, w, h){
+    const grad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.max(w, h) * 0.7);
+    grad.addColorStop(0, '#1c2129');
+    grad.addColorStop(1, '#14171c');
+    ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, h);
-    const source = getBgDrawSource();
-    if(!source){
-      const grad = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, Math.max(w, h) * 0.7);
-      grad.addColorStop(0, '#1c2129');
-      grad.addColorStop(1, '#14171c');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, w, h);
-      return;
-    }
-    // Note: use isNaN checks here, not `parseFloat(...) || 50` — 0 is a valid,
-    // reachable position (fully left/top) and is falsy, so `0 || 50` would
-    // silently discard it and re-center the crop, unlike the on-screen CSS/
-    // video-layout path (applyBgVideoLayout / computeBgDrawRect) which shares
-    // this exact same computeBgDrawRect() call. Per-asset settings are
-    // already sanitized numbers (see makeDefaultBgAssetSettings()), but the
-    // isNaN guard is kept for safety against a hand-edited/older project file.
+  }
+
+  // Note: use isNaN checks here, not `parseFloat(...) || 50` — 0 is a valid,
+  // reachable position (fully left/top) and is falsy, so `0 || 50` would
+  // silently discard it and re-center the crop, unlike the on-screen CSS/
+  // video-layout path (applyBgVideoLayout / computeBgDrawRect) which shares
+  // this exact same computeBgDrawRect() call. Per-asset settings are
+  // already sanitized numbers (see makeDefaultBgAssetSettings()), but the
+  // isNaN guard is kept for safety against a hand-edited/older project file.
+  // extraAlpha layers on top of the source's own opacity/loop-fade alpha -
+  // used by the transition blend below to ramp a source in/out.
+  function drawBgSourceInto(ctx, w, h, scale, source, extraAlpha){
     const s = source.asset.settings;
     const zoomRaw = parseFloat(s.zoom);
     const posXRaw = parseFloat(s.posX);
@@ -10822,10 +11147,54 @@ export function createThreeKaleidoscope(){
     );
     const prevAlpha = ctx.globalAlpha;
     const opacityRaw = parseFloat(s.opacity);
-    ctx.globalAlpha = prevAlpha * getBgVideoLoopAlpha(source.asset) * (isNaN(opacityRaw) ? 1 : opacityRaw);
+    const baseOpacity = isNaN(opacityRaw) ? 1 : opacityRaw;
+    ctx.globalAlpha = prevAlpha * getBgVideoLoopAlpha(source.asset) * baseOpacity * extraAlpha;
     ctx.drawImage(source.el, rect.x, rect.y, rect.w, rect.h);
     ctx.globalAlpha = prevAlpha;
-    if(previewBg.classList.contains('has-image')){
+  }
+
+  function drawCanvasBackground(ctx, w, h, scale){
+    scale = scale || 1;
+    ctx.fillStyle = '#14171c';
+    ctx.fillRect(0, 0, w, h);
+    if(!bgVisible){
+      drawBgPlaceholder(ctx, w, h);
+      return;
+    }
+    const transState = getBgTransitionState();
+    const fromSource = getBgDrawSourceFor(getActiveBgAsset(), previewBgVideo);
+    let anyDrawn = false;
+    if(fromSource){
+      drawBgSourceInto(ctx, w, h, scale, fromSource, 1);
+      anyDrawn = true;
+    } else if(!transState){
+      drawBgPlaceholder(ctx, w, h);
+    }
+
+    if(transState){
+      // B-3: blend in the incoming asset (and a solid color hump for the
+      // fade-black/fade-white types) on top of the outgoing one - see
+      // getBgTransitionState()/bgTransitionLayerAlpha() for the same math
+      // driving the on-screen preview's layer B, kept identical so export
+      // and preview look the same.
+      const toSource = getBgDrawSourceFor(transState.to, previewBgVideoB);
+      if(toSource){
+        drawBgSourceInto(ctx, w, h, scale, toSource, bgTransitionLayerAlpha(transState.type, transState.progress));
+        anyDrawn = true;
+      }
+      if(transState.type === 'fadeBlack' || transState.type === 'fadeWhite'){
+        const colorAlpha = bgTransitionColorAlpha(transState.progress);
+        if(colorAlpha > 0){
+          const prevAlpha = ctx.globalAlpha;
+          ctx.globalAlpha = prevAlpha * colorAlpha;
+          ctx.fillStyle = transState.type === 'fadeBlack' ? '#000' : '#fff';
+          ctx.fillRect(0, 0, w, h);
+          ctx.globalAlpha = prevAlpha;
+        }
+      }
+    }
+
+    if(anyDrawn){
       ctx.fillStyle = 'rgba(8,10,13,.48)';
       ctx.fillRect(0, 0, w, h);
     }
