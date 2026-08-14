@@ -8142,11 +8142,27 @@ export function createThreeKaleidoscope(){
   }
 
   /* -------- B-3: transitions between adjacent background assets -------- */
+  // "Adjacent" (no gap) used to mean next.start === a.end exactly - too
+  // strict in practice: a drag lands on a 10ms-quantized position
+  // (attachBgAssetHandleDrag/attachBgAssetMoveDrag round to 2 decimals)
+  // while manual numeric entry allows 3, and different placement code
+  // paths (auto-sequencing, resequencing, reordering, manual edits) each
+  // do their own independent Math.round(...*1000)/1000 - so two asset
+  // boundaries that are visually/functionally touching can easily end up
+  // a millisecond or two apart, which silently disabled every transition
+  // on that boundary with no visible sign why (reported as "about half of
+  // my transitions just don't play"). A small tolerance fixes this without
+  // needing pixel/millisecond-perfect dragging.
+  const BG_ADJACENCY_EPSILON_SEC = 0.02;
+  function bgAssetsAreAdjacent(asset, next){
+    return !!(next && asset && asset.end !== null && Math.abs(next.start - asset.end) <= BG_ADJACENCY_EPSILON_SEC);
+  }
+
   // A transition only ever applies at a boundary between two assets that
-  // are directly adjacent (no gap: next.start === a.end) - a gap already
-  // has its own well-defined "nothing showing" behavior (see
-  // getBgDrawSource()) that a transition would only confuse. Returns null
-  // outside any transition window.
+  // are directly adjacent (see bgAssetsAreAdjacent()) - a gap already has
+  // its own well-defined "nothing showing" behavior (see getBgDrawSource())
+  // that a transition would only confuse. Returns null outside any
+  // transition window.
   function getBgTransitionState(t){
     if(t === undefined) t = audioEl.currentTime;
     for(let i = 0; i < bgAssets.length; i++){
@@ -8155,7 +8171,7 @@ export function createThreeKaleidoscope(){
       const trans = a.settings.transitionOut;
       if(!trans || trans.type === 'none') continue;
       const next = bgAssets[i + 1];
-      if(!next || next.start !== a.end) continue;
+      if(!bgAssetsAreAdjacent(a, next)) continue;
       const dur = Math.max(0.05, trans.duration || 0.6);
       const winStart = a.end - dur;
       if(t >= winStart && t < a.end){
@@ -8680,7 +8696,7 @@ export function createThreeKaleidoscope(){
     }
 
     const neighbors = bgAssetNeighbors(asset);
-    const hasAdjacentNext = !!(neighbors.next && asset.end !== null && neighbors.next.start === asset.end);
+    const hasAdjacentNext = bgAssetsAreAdjacent(asset, neighbors.next);
     const transitionOut = asset.settings.transitionOut || { type: 'none', duration: 0.6 };
 
     const transLabel = document.createElement('label');
