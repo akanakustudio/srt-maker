@@ -727,12 +727,15 @@
   }
   .preview-bg.has-image::after{background:rgba(8,10,13,.48);}
   .preview-bg-video{position:absolute;top:0;left:0;object-fit:fill;}
-  /* B-3: transition preview layers, stacked above the normal (layer A)
-     background. Layer B previews the "incoming" asset and fades in via
-     opacity (driven by applyBgTransitionFrame()); the solid color layer is
-     used only by the fade-black/fade-white transition types. Both start
-     fully transparent/hidden and are pointer-events:none so they never
-     interfere with normal interaction with the stage underneath. */
+  /* B-3: transition preview layer, stacked above the normal (primary)
+     background. Previews the "incoming" asset and fades in via opacity
+     (driven by updateActiveBgAsset()); the solid color layer is used only
+     by the fade-black/fade-white transition types. Both start fully
+     transparent/hidden and are pointer-events:none so they never interfere
+     with normal interaction with the stage underneath. .preview-bg-incoming
+     is applied to whichever physical layer is currently the *secondary*
+     one (see swapBgLayers()) - not pinned to one specific element, since
+     the two layers swap roles at every seamless transition handoff. */
   .preview-bg-incoming{z-index:0;opacity:0;pointer-events:none;}
   .preview-bg-incoming::after{display:none;}
   .preview-bg-fade-color{
@@ -951,7 +954,7 @@
           <div class="preview-bg" id="previewBg">
             <video class="preview-bg-video" id="previewBgVideo" muted loop playsinline style="display:none"></video>
           </div>
-          <div class="preview-bg preview-bg-incoming" id="previewBgB">
+          <div class="preview-bg" id="previewBgB">
             <video class="preview-bg-video" id="previewBgVideoB" muted loop playsinline style="display:none"></video>
           </div>
           <div class="preview-bg-fade-color" id="previewBgFadeColor"></div>
@@ -7424,6 +7427,42 @@ export function createThreeKaleidoscope(){
   const previewBgB = document.getElementById('previewBgB');
   const previewBgVideoB = document.getElementById('previewBgVideoB');
   const previewBgFadeColor = document.getElementById('previewBgFadeColor');
+
+  // previewBg/previewBgVideo and previewBgB/previewBgVideoB are two
+  // physically identical layers; which one is "primary" (the officially
+  // active background, opacity driven by asset settings) vs "secondary"
+  // (the transition-preview layer, opacity driven by transition progress)
+  // is a role that SWAPS at a transition handoff (see swapBgLayers()) -
+  // everything below reads/writes primaryBg/primaryVideo/secondaryBg/
+  // secondaryVideo rather than the physical elements directly, so a swap
+  // is just a variable reassignment, never a DOM move. This is what lets a
+  // video already preloaded+decoded on the secondary layer during a
+  // crossfade become "the" active video at the exact handoff instant with
+  // no src reload - reloading right at that moment (the original design)
+  // is what caused the reported "ぎこちない" stutter at every video-to-video
+  // transition boundary.
+  let primaryBg = previewBg, primaryVideo = previewBgVideo;
+  let secondaryBg = previewBgB, secondaryVideo = previewBgVideoB;
+  function swapBgLayers(){
+    const tmpBg = primaryBg, tmpVideo = primaryVideo;
+    primaryBg = secondaryBg; primaryVideo = secondaryVideo;
+    secondaryBg = tmpBg; secondaryVideo = tmpVideo;
+    // .preview-bg-incoming suppresses the has-image darkening ::after
+    // overlay (see its CSS) - only ever meaningful on the current
+    // secondary/preview layer, so it has to travel with the role, not stay
+    // pinned to whichever physical element originally had it in the HTML.
+    primaryBg.classList.remove('preview-bg-incoming');
+    secondaryBg.classList.add('preview-bg-incoming');
+  }
+  secondaryBg.classList.add('preview-bg-incoming');
+
+  function clearBgVideoEl(videoEl){
+    videoEl.pause();
+    videoEl.removeAttribute('src');
+    videoEl.load();
+    videoEl.style.display = 'none';
+  }
+
   const bgAssetList = document.getElementById('bgAssetList');
   const bgAssetEmptyHint = document.getElementById('bgAssetEmptyHint');
   const bgAssetTrackRow = document.getElementById('bgAssetTrackRow');
@@ -7795,7 +7834,7 @@ export function createThreeKaleidoscope(){
     videoEl.style.top = rect.y + 'px';
   }
   function applyBgVideoLayout(){
-    applyBgVideoLayoutFor(previewBgVideo, getActiveBgAssetObj());
+    applyBgVideoLayoutFor(primaryVideo, getActiveBgAssetObj());
   }
 
   // asset=null is a valid, common call (e.g. a gap in the timeline with
@@ -7819,18 +7858,22 @@ export function createThreeKaleidoscope(){
     applyBgVideoLayoutFor(videoEl, asset);
   }
   function applyBgTransformForAsset(asset){
-    applyBgTransformFor(previewBg, previewBgVideo, asset);
+    applyBgTransformFor(primaryBg, primaryVideo, asset);
   }
 
   function applyBgOpacityFor(bgEl, asset){
     bgEl.style.opacity = asset ? asset.settings.opacity : 1;
   }
   function applyBgOpacityForAsset(asset){
-    applyBgOpacityFor(previewBg, asset);
+    applyBgOpacityFor(primaryBg, asset);
   }
 
   function applyBgVisibility(){
+    // Applies to both layers - otherwise a transition in progress could
+    // leave the secondary/preview layer visible even while bgVisible=false
+    // hides the primary one.
     previewBg.style.visibility = bgVisible ? '' : 'hidden';
+    previewBgB.style.visibility = bgVisible ? '' : 'hidden';
     previewBgVisibleToggle.classList.toggle('active', bgVisible);
   }
   previewBgVisibleToggle.addEventListener('click', function(){
@@ -7839,10 +7882,19 @@ export function createThreeKaleidoscope(){
     scheduleSaveSession();
   });
   applyBgVisibility();
-  previewBgVideo.addEventListener('loadedmetadata', applyBgVideoLayout);
+  // Safety-net re-layout once a video's real dimensions are known -
+  // attached to both physical elements (rather than "the primary one",
+  // which can change after a role swap) and figures out at call time
+  // which asset it should be representing right now.
+  function relayoutBgVideoElement(videoEl){
+    const asset = (videoEl === primaryVideo) ? getActiveBgAssetObj() : bgTransitionToAsset;
+    applyBgVideoLayoutFor(videoEl, asset);
+  }
+  previewBgVideo.addEventListener('loadedmetadata', function(){ relayoutBgVideoElement(previewBgVideo); });
+  previewBgVideoB.addEventListener('loadedmetadata', function(){ relayoutBgVideoElement(previewBgVideoB); });
   function refreshAllBgVideoLayouts(){
     applyBgVideoLayout();
-    if(bgTransitionToAsset) applyBgVideoLayoutFor(previewBgVideoB, bgTransitionToAsset);
+    if(bgTransitionToAsset) applyBgVideoLayoutFor(secondaryVideo, bgTransitionToAsset);
   }
   if(typeof ResizeObserver !== 'undefined'){
     new ResizeObserver(refreshAllBgVideoLayouts).observe(previewStage);
@@ -7875,34 +7927,72 @@ export function createThreeKaleidoscope(){
   function syncBgVideoToAudio(forceRestart){
     const asset = getActiveBgAssetObj();
     if(!asset || asset.kind !== 'video') return;
-    const dur = previewBgVideo.duration;
+    const dur = primaryVideo.duration;
     if(!dur || !isFinite(dur) || dur <= 0) return;
     const target = (audioEl.currentTime - asset.start) % dur;
     const safeTarget = target < 0 ? 0 : target;
-    if(forceRestart || Math.abs(previewBgVideo.currentTime - safeTarget) > 0.25){
-      previewBgVideo.currentTime = safeTarget;
+    if(forceRestart || Math.abs(primaryVideo.currentTime - safeTarget) > 0.25){
+      primaryVideo.currentTime = safeTarget;
     }
   }
 
-  // Central "what should be showing right now" driver - swaps the active
-  // asset (image decode / video src) only when it actually changes, then
-  // (re)syncs the video position. Called from every audioEl transport event
-  // below, plus after any structural bgAssets edit (add/remove/retime) and
-  // after a project loads.
+  // Central "what should be showing right now" driver - updates the B-3
+  // transition-preview layer first, then swaps the active asset (image
+  // decode / video src) only when it actually changes, then (re)syncs the
+  // video position. Called from every audioEl transport event below, plus
+  // the rAF loop (bgVideoFadeLoop), plus after any structural bgAssets edit
+  // (add/remove/retime) and after a project loads.
+  //
+  // The transition-frame update deliberately runs BEFORE switchActiveBgAsset
+  // is asked to switch, and its own "no transition" cleanup deliberately
+  // runs AFTER - otherwise, right at the exact instant a transition ends,
+  // there's a one-tick race where the transition-frame side could release
+  // the secondary/preview layer's already-loaded video a moment before
+  // switchActiveBgAsset gets a chance to swap it in seamlessly, silently
+  // falling back to the reload path (and its "ぎこちない" stutter) it was
+  // specifically added to avoid. See switchActiveBgAsset()'s own comment.
   function updateActiveBgAsset(forceRestart){
+    const transState = getBgTransitionState();
+    if(transState){
+      if(!bgTransitionToAsset || bgTransitionToAsset.id !== transState.to.id){
+        bgTransitionToAsset = transState.to;
+        activateBgLayerB(transState.to);
+      }
+      secondaryBg.style.opacity = bgTransitionLayerAlpha(transState.type, transState.progress);
+      if(transState.type === 'fadeBlack' || transState.type === 'fadeWhite'){
+        previewBgFadeColor.style.background = transState.type === 'fadeBlack' ? '#000' : '#fff';
+        previewBgFadeColor.style.opacity = bgTransitionColorAlpha(transState.progress);
+      } else {
+        previewBgFadeColor.style.opacity = 0;
+      }
+    } else {
+      previewBgFadeColor.style.opacity = 0;
+    }
+
     const next = getActiveBgAsset();
     if((next ? next.id : null) !== activeBgAssetId) switchActiveBgAsset(next);
     syncBgVideoToAudio(forceRestart);
+
+    // Only release the secondary/preview layer once switchActiveBgAsset()
+    // above has had its chance to consume a matching bgTransitionToAsset
+    // via its swap path (which itself already clears bgTransitionToAsset
+    // and resets whichever layer is now secondary) - if that happened,
+    // this is already null and there's nothing left to do here.
+    if(!transState && bgTransitionToAsset !== null){
+      bgTransitionToAsset = null;
+      secondaryBg.style.opacity = 0;
+      clearBgVideoEl(secondaryVideo);
+    }
   }
 
   audioEl.addEventListener('play', function(){
     updateActiveBgAsset(true);
     const asset = getActiveBgAssetObj();
-    if(asset && asset.kind === 'video') previewBgVideo.play().catch(function(){});
+    if(asset && asset.kind === 'video') primaryVideo.play().catch(function(){});
   });
   audioEl.addEventListener('pause', function(){
     const asset = getActiveBgAssetObj();
-    if(asset && asset.kind === 'video') previewBgVideo.pause();
+    if(asset && asset.kind === 'video') primaryVideo.pause();
   });
   audioEl.addEventListener('seeking', function(){ updateActiveBgAsset(true); });
   audioEl.addEventListener('seeked', function(){ updateActiveBgAsset(true); });
@@ -7913,12 +8003,17 @@ export function createThreeKaleidoscope(){
   // briefly dips opacity near the wrap-around point. Shared with the canvas
   // export path (drawCanvasBackground) via the same alpha calculation so
   // on-screen preview and exported video look identical.
-  function getBgVideoLoopAlpha(asset){
+  // videoEl defaults to primaryVideo (the on-screen preview's own loop-fade
+  // dip always concerns whichever video is currently primary) but the
+  // canvas export path's transition blend also needs this computed against
+  // secondaryVideo for the incoming asset - see drawBgSourceInto().
+  function getBgVideoLoopAlpha(asset, videoEl){
+    videoEl = videoEl || primaryVideo;
     if(!asset || asset.kind !== 'video' || asset.settings.loopEffect !== 'fade') return 1;
-    const dur = previewBgVideo.duration;
+    const dur = videoEl.duration;
     if(!dur || !isFinite(dur) || dur <= 0) return 1;
     const fadeDur = Math.min(dur / 2, Math.max(0.05, asset.settings.loopFadeDuration || 0.5));
-    const t = previewBgVideo.currentTime;
+    const t = videoEl.currentTime;
     if(t < fadeDur) return clamp(t / fadeDur, 0, 1);
     const toEnd = dur - t;
     if(toEnd < fadeDur) return clamp(toEnd / fadeDur, 0, 1);
@@ -7928,12 +8023,14 @@ export function createThreeKaleidoscope(){
   function bgVideoFadeLoop(){
     bgVideoFadeRAF = requestAnimationFrame(bgVideoFadeLoop);
     const asset = getActiveBgAssetObj();
-    if(!asset || asset.kind !== 'video') previewBgVideo.style.opacity = '';
-    else previewBgVideo.style.opacity = getBgVideoLoopAlpha(asset);
+    if(!asset || asset.kind !== 'video') primaryVideo.style.opacity = '';
+    else primaryVideo.style.opacity = getBgVideoLoopAlpha(asset);
     // Driven from this same continuous rAF loop (not just audioEl's
-    // timeupdate, which some browsers throttle to ~250ms) so the
-    // crossfade/dissolve/fade-color opacity animates smoothly frame to frame.
-    applyBgTransitionFrame();
+    // timeupdate, which some browsers throttle to ~250ms) so the B-3
+    // transition (crossfade/dissolve/fade-color) opacity animates smoothly
+    // frame to frame, and the swap-on-handoff in switchActiveBgAsset() (via
+    // updateActiveBgAsset()) gets a chance to run every frame too.
+    updateActiveBgAsset(false);
   }
   bgVideoFadeRAF = requestAnimationFrame(bgVideoFadeLoop);
 
@@ -7957,24 +8054,18 @@ export function createThreeKaleidoscope(){
     rt.imageEl = img;
   }
 
-  function clearPreviewBgVideo(){
-    previewBgVideo.pause();
-    previewBgVideo.removeAttribute('src');
-    previewBgVideo.load();
-    previewBgVideo.style.display = 'none';
-  }
-
-  // Loads the video and, once its metadata is ready, syncs its position to
-  // the audio's current time and only starts it playing if the audio is
-  // already playing - rather than always autoplaying immediately on select,
-  // which is what left it running out of sync with playback later on.
-  function activateBgVideo(url){
-    previewBgVideo.style.display = 'block';
-    previewBgVideo.src = url;
-    previewBgVideo.load();
-    previewBgVideo.addEventListener('loadedmetadata', function(){
+  // Loads the video into primaryVideo and, once its metadata is ready,
+  // syncs its position to the audio's current time and only starts it
+  // playing if the audio is already playing - rather than always
+  // autoplaying immediately on select, which is what left it running out
+  // of sync with playback later on.
+  function activatePrimaryVideo(url){
+    primaryVideo.style.display = 'block';
+    primaryVideo.src = url;
+    primaryVideo.load();
+    primaryVideo.addEventListener('loadedmetadata', function(){
       syncBgVideoToAudio(true);
-      if(!audioEl.paused) previewBgVideo.play().catch(function(){});
+      if(!audioEl.paused) primaryVideo.play().catch(function(){});
     }, { once: true });
   }
 
@@ -7991,30 +8082,59 @@ export function createThreeKaleidoscope(){
     return null;
   }
 
-  // Swaps which asset is actually driving the live preview - a shared
-  // single <video> element re-pointed at whichever video asset is active
-  // (rather than one <video> per asset) since ranges never overlap, so at
-  // most one video is ever live at a time; keeping N decoders resident for
-  // N video assets would be pure waste. Cost: crossing into a new video
-  // asset needs a brief src-reload + loadedmetadata wait, same latency
-  // class as the original single-background file picker.
+  // Swaps which asset is actually driving the live preview. Normally this
+  // (re)points the primary <video>/background layer at whichever asset is
+  // now active (a shared element re-pointed per asset, rather than one
+  // <video> per asset, since ranges never overlap so at most one video is
+  // ever live at a time - keeping N decoders resident for N video assets
+  // would be pure waste; the cost is a brief src-reload + loadedmetadata
+  // wait when crossing into a new video asset).
+  //
+  // The one exception: if the asset becoming active is exactly the one the
+  // secondary/transition-preview layer was already showing (B-3's
+  // crossfade etc.), that video is already fully loaded, decoded, and
+  // sitting at frame 0 - precisely where it needs to be the instant its
+  // own window opens. In that case swap layer roles instead of reloading;
+  // reloading right at that instant is what caused the reported
+  // "ぎこちない" (janky) stutter at every video-to-video transition boundary.
   function switchActiveBgAsset(asset){
     activeBgAssetId = asset ? asset.id : null;
-    clearPreviewBgVideo();
+
+    if(asset && bgTransitionToAsset && asset.id === bgTransitionToAsset.id){
+      swapBgLayers();
+      bgTransitionToAsset = null; // it's the primary layer's asset now, not "the transition preview" anymore
+      previewBgFadeColor.style.opacity = 0;
+      // Reset what is now the secondary layer (the old primary) to empty,
+      // ready to be reused as the *next* transition's preview layer.
+      clearBgVideoEl(secondaryVideo);
+      secondaryBg.classList.remove('has-image');
+      secondaryBg.style.backgroundImage = '';
+      secondaryBg.style.opacity = 0;
+
+      applyBgTransformForAsset(asset);
+      applyBgOpacityForAsset(asset);
+      if(asset.kind === 'video'){
+        syncBgVideoToAudio(true);
+        if(!audioEl.paused) primaryVideo.play().catch(function(){});
+      }
+      return;
+    }
+
+    clearBgVideoEl(primaryVideo);
     if(!asset){
-      previewBg.style.backgroundImage = '';
-      previewBg.classList.remove('has-image');
+      primaryBg.style.backgroundImage = '';
+      primaryBg.classList.remove('has-image');
       applyBgTransformForAsset(null);
       return;
     }
-    previewBg.classList.add('has-image');
+    primaryBg.classList.add('has-image');
     let rt = bgRuntime.get(asset.id);
     if(!rt){ rt = { url: URL.createObjectURL(asset.file), imageEl: null }; bgRuntime.set(asset.id, rt); }
     if(asset.kind === 'video'){
-      previewBg.style.backgroundImage = '';
-      activateBgVideo(rt.url);
+      primaryBg.style.backgroundImage = '';
+      activatePrimaryVideo(rt.url);
     } else {
-      previewBg.style.backgroundImage = 'url(' + rt.url + ')';
+      primaryBg.style.backgroundImage = 'url(' + rt.url + ')';
       if(!rt.imageEl) decodeBgAssetImage(asset, rt);
     }
     applyBgTransformForAsset(asset);
@@ -8064,68 +8184,41 @@ export function createThreeKaleidoscope(){
     return 1 - Math.abs(progress * 2 - 1);
   }
 
-  function clearPreviewBgVideoB(){
-    previewBgVideoB.pause();
-    previewBgVideoB.removeAttribute('src');
-    previewBgVideoB.load();
-    previewBgVideoB.style.display = 'none';
-  }
-
-  // Points layer B at whichever asset is about to become active, reusing
-  // the same bgRuntime cache layer A uses (the asset will likely become
-  // the primary active asset moments later anyway, so there's no benefit
-  // to decoding it twice). Video assets preview from their own frame 0
-  // (not actually playing) during the transition - true pre-roll playback
-  // would need the video already advancing before its official start time,
-  // which is deferred as a possible future refinement.
+  // Points the secondary/preview layer at whichever asset is about to
+  // become active, reusing the same bgRuntime cache the primary layer uses
+  // (the asset will likely become the primary active asset moments later
+  // anyway, so there's no benefit to decoding it twice). Video assets
+  // preview from their own frame 0 (not actually playing) during the
+  // transition - per the app's own design, a video always starts fresh
+  // from frame 0 the instant its own window opens, and that instant *is*
+  // the handoff moment (see switchActiveBgAsset()'s swap path), so sitting
+  // at frame 0 throughout the preceding crossfade is the correct state to
+  // hand off from, not a simplification to fix later.
   function activateBgLayerB(asset){
-    clearPreviewBgVideoB();
-    previewBgB.classList.remove('has-image');
-    previewBgB.style.backgroundImage = '';
+    clearBgVideoEl(secondaryVideo);
+    secondaryBg.classList.remove('has-image');
+    secondaryBg.style.backgroundImage = '';
     if(!asset) return;
     let rt = bgRuntime.get(asset.id);
     if(!rt){ rt = { url: URL.createObjectURL(asset.file), imageEl: null }; bgRuntime.set(asset.id, rt); }
     if(asset.kind === 'video'){
-      previewBgVideoB.style.display = 'block';
-      previewBgVideoB.src = rt.url;
-      previewBgVideoB.load();
-      previewBgVideoB.addEventListener('loadedmetadata', function(){
-        previewBgVideoB.currentTime = 0;
-        applyBgVideoLayoutFor(previewBgVideoB, asset);
+      secondaryVideo.style.display = 'block';
+      secondaryVideo.src = rt.url;
+      secondaryVideo.load();
+      secondaryVideo.addEventListener('loadedmetadata', function(){
+        secondaryVideo.currentTime = 0;
+        applyBgVideoLayoutFor(secondaryVideo, asset);
       }, { once: true });
     } else {
-      previewBgB.style.backgroundImage = 'url(' + rt.url + ')';
+      secondaryBg.style.backgroundImage = 'url(' + rt.url + ')';
       if(!rt.imageEl) decodeBgAssetImage(asset, rt);
     }
-    previewBgB.classList.add('has-image');
-    applyBgTransformFor(previewBgB, previewBgVideoB, asset);
-    applyBgOpacityFor(previewBgB, asset);
+    secondaryBg.classList.add('has-image');
+    applyBgTransformFor(secondaryBg, secondaryVideo, asset);
+    applyBgOpacityFor(secondaryBg, asset);
   }
 
-  let bgTransitionToAsset = null; // whichever asset layer B currently previews, or null outside a transition
-  function applyBgTransitionFrame(){
-    const state = getBgTransitionState();
-    if(!state){
-      if(bgTransitionToAsset !== null){
-        bgTransitionToAsset = null;
-        previewBgB.style.opacity = 0;
-        clearPreviewBgVideoB();
-      }
-      previewBgFadeColor.style.opacity = 0;
-      return;
-    }
-    if(!bgTransitionToAsset || bgTransitionToAsset.id !== state.to.id){
-      bgTransitionToAsset = state.to;
-      activateBgLayerB(state.to);
-    }
-    previewBgB.style.opacity = bgTransitionLayerAlpha(state.type, state.progress);
-    if(state.type === 'fadeBlack' || state.type === 'fadeWhite'){
-      previewBgFadeColor.style.background = state.type === 'fadeBlack' ? '#000' : '#fff';
-      previewBgFadeColor.style.opacity = bgTransitionColorAlpha(state.progress);
-    } else {
-      previewBgFadeColor.style.opacity = 0;
-    }
-  }
+  let bgTransitionToAsset = null; // whichever asset the secondary layer currently previews, or null outside a transition
 
   function genBgAssetId(){
     return 'bg_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
@@ -11373,7 +11466,7 @@ export function createThreeKaleidoscope(){
   }
   function getBgDrawSource(){
     if(!bgVisible) return null;
-    return getBgDrawSourceFor(getActiveBgAsset(), previewBgVideo);
+    return getBgDrawSourceFor(getActiveBgAsset(), primaryVideo);
   }
 
   function drawBgPlaceholder(ctx, w, h){
@@ -11408,7 +11501,7 @@ export function createThreeKaleidoscope(){
     const prevAlpha = ctx.globalAlpha;
     const opacityRaw = parseFloat(s.opacity);
     const baseOpacity = isNaN(opacityRaw) ? 1 : opacityRaw;
-    ctx.globalAlpha = prevAlpha * getBgVideoLoopAlpha(source.asset) * baseOpacity * extraAlpha;
+    ctx.globalAlpha = prevAlpha * getBgVideoLoopAlpha(source.asset, source.el) * baseOpacity * extraAlpha;
     ctx.drawImage(source.el, rect.x, rect.y, rect.w, rect.h);
     ctx.globalAlpha = prevAlpha;
   }
@@ -11422,7 +11515,7 @@ export function createThreeKaleidoscope(){
       return;
     }
     const transState = getBgTransitionState();
-    const fromSource = getBgDrawSourceFor(getActiveBgAsset(), previewBgVideo);
+    const fromSource = getBgDrawSourceFor(getActiveBgAsset(), primaryVideo);
     let anyDrawn = false;
     if(fromSource){
       drawBgSourceInto(ctx, w, h, scale, fromSource, 1);
@@ -11437,7 +11530,7 @@ export function createThreeKaleidoscope(){
       // getBgTransitionState()/bgTransitionLayerAlpha() for the same math
       // driving the on-screen preview's layer B, kept identical so export
       // and preview look the same.
-      const toSource = getBgDrawSourceFor(transState.to, previewBgVideoB);
+      const toSource = getBgDrawSourceFor(transState.to, secondaryVideo);
       if(toSource){
         drawBgSourceInto(ctx, w, h, scale, toSource, bgTransitionLayerAlpha(transState.type, transState.progress));
         anyDrawn = true;
