@@ -672,4 +672,12 @@
   - **配線**: `EQ_TYPES`配列・EQ種類`<select>`のoptgroup・`ensureThreeEqLoading()`でのインスタンス生成・`drawEqThreeKaleidoscope()`ラッパー・プレビュー/録画両方のswitch文の5箇所に追加（既存5スタイルと同じ配線パターン）。
   - **検証**: `node --check`で構文確認後、他スタイルと同じ手法（`threeEqSrc`モジュールを直接ロードするPlaywrightハーネス、および実アプリでのノイズ音源再生）で確認。カラー1/カラー2のグラデーションが渦を描く各ジェムに正しく現れること、回転・脈動・コアの明滅が機能すること、コンソールエラーが出ないことを確認済み。
 
+* **【対応済み】** EQ・フォントのブックマーク機能に以下を追加：(1) ブックマークの名称変更、(2) ブックマークをファイルに保存、(3) ファイルからブックマークを追加。
+  - 対象は`localStorage`ベースの既存ブックマーク3種（`loadBookmarks(kind)`/`addBookmark`/`deleteBookmark`、`kind`は`'eq'`＝グラフィックイコライザー設定一式、`'font'`＝フォント設定一式、`'color'`＝EQのカラーパターンプリセット）すべて。ユーザーの要望文言は「EQとフォント」だが、`'color'`もEQパネル内の同じブックマーク機構を使っているため、一貫性のため3種類とも同じ機能を追加した。
+  - **概要**: `renameBookmark(kind,index,rerender)`・`exportBookmarks(kind)`（現在の全ブックマークを`{_type,kind,version,bookmarks}`形式のJSONファイルに書き出し、既存のプレビュー設定書き出しと同じBlob+ダウンロードリンク方式、ファイル名は`プロジェクト名_種別ブックマーク_タイムスタンプ.json`）・`importBookmarksFromFile(kind,file,sanitizeData,rerender)`（JSONを読み込み、既存リストの末尾に追加＝置き換えではなく常にマージ。`sanitizeData`で種別ごとの検証・正規化を通し、不正なエントリはスキップして続行）という3つの共通関数を追加し、`eq`/`font`/`color`それぞれのUIから呼び出す。
+    - `eq`のインポート検証には既存の`sanitizeEqStyle`をそのまま再利用。`color`用に新規`sanitizeBookmarkColorData`（`#RRGGBB`形式かを正規表現でチェック）を追加。`font`は`applyFontSettings`が元々部分的なデータに寛容なため、検証なしでそのまま格納。
+  - `eq`/`font`（`.bookmark-chip`の名前ボタン＋削除ボタン）には名前ボタンの隣に✎（改名）ボタンを追加。`color`（名前を表示しないスワッチ型UI、`.eq-color-bookmark-chip`）には削除ボタン（右上）と対になる形で左上に改名ボタンを追加。
+  - 書き出し/読み込みボタンは各ブックマークセクションの「＋現在の設定を保存」ボタンの隣に追加（読み込みは`<input type=file>`を`<label>`でラップした既存パターンを踏襲）。
+  - **検証**: Playwrightで3種類すべてについて、追加→改名→書き出し（`page.waitForEvent('download')`でファイル内容を検証）→`localStorage`をクリアして空になることを確認→書き出したファイルを読み込んで復元されることを確認→同じファイルをもう一度読み込むと（置き換えでなく）マージされて2件になることを確認。コンソールエラーなし。
+
 
