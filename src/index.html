@@ -533,6 +533,11 @@
   .bg-asset-list{display:flex;flex-direction:column;gap:6px;width:100%;}
   .bg-asset-row{border:1px solid var(--line);border-radius:8px;background:var(--panel2);overflow:hidden;}
   .bg-asset-row-head{display:flex;align-items:center;gap:8px;padding:7px 9px;font-size:11.5px;flex-wrap:wrap;}
+  .bg-asset-thumb{
+    flex:none;width:32px;height:32px;border-radius:5px;object-fit:cover;
+    background:var(--panel);border:1px solid var(--line);
+  }
+  .bg-asset-thumb-empty{background:linear-gradient(135deg,var(--panel) 25%,var(--panel2) 25%,var(--panel2) 50%,var(--panel) 50%,var(--panel) 75%,var(--panel2) 75%);background-size:8px 8px;}
   .bg-asset-kind-badge{
     flex:none;font-size:10px;padding:2px 6px;border-radius:10px;
     background:rgba(255,176,32,.18);color:#ffb020;border:1px solid #cf8b1f;
@@ -7936,6 +7941,43 @@ export function createThreeKaleidoscope(){
   // Appends one asset sequentially after the current last asset's end (or
   // at 0 for the first one) - the only placement B-1's add flow offers;
   // dragging it elsewhere on the timeline is how it gets repositioned.
+  // Small thumbnail for the asset list row. Images just reuse a (cached,
+  // revoked-on-removal) object URL directly as an <img> src - cheap and
+  // instant. Videos have no such shortcut, so a hidden <video> decodes its
+  // first frame once and a small offscreen canvas captures it into a data
+  // URL (asset.thumbUrl) - a one-time static image instead of keeping a
+  // live decoding <video> per row, which would be wasteful for a list that
+  // could hold several video assets. Async either way, so callers re-render
+  // the list once thumbUrl is actually set.
+  function generateBgAssetThumb(asset){
+    if(asset.kind === 'image'){
+      asset.thumbUrl = URL.createObjectURL(asset.file);
+      renderBgAssetList();
+      return;
+    }
+    const probe = document.createElement('video');
+    probe.preload = 'auto';
+    probe.muted = true;
+    probe.src = URL.createObjectURL(asset.file);
+    probe.addEventListener('loadeddata', function(){
+      try {
+        const cw = 96, ch = 96;
+        const vw = probe.videoWidth || 1, vh = probe.videoHeight || 1;
+        const scale = Math.max(cw / vw, ch / vh);
+        const dw = vw * scale, dh = vh * scale;
+        const c = document.createElement('canvas');
+        c.width = cw; c.height = ch;
+        c.getContext('2d').drawImage(probe, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+        asset.thumbUrl = c.toDataURL('image/jpeg', 0.72);
+      } catch(e){
+        asset.thumbUrl = null; // canvas tainted / decode failure - row falls back to just the kind badge
+      }
+      URL.revokeObjectURL(probe.src);
+      renderBgAssetList();
+    }, { once: true });
+    probe.load();
+  }
+
   function addBgAssetFromFile(file){
     const kind = file.type.indexOf('video/') === 0 ? 'video' : 'image';
     const start = bgAssets.length
@@ -7945,7 +7987,8 @@ export function createThreeKaleidoscope(){
       id: genBgAssetId(), kind: kind, file: file,
       start: Math.round(start * 100) / 100,
       end: Math.round((start + DEFAULT_BG_IMAGE_DURATION_SEC) * 100) / 100,
-      settings: makeDefaultBgAssetSettings()
+      settings: makeDefaultBgAssetSettings(),
+      thumbUrl: null
     };
     bgAssets.push(asset);
     sortBgAssets();
@@ -7954,6 +7997,7 @@ export function createThreeKaleidoscope(){
     updateActiveBgAsset(true);
     updateSaveEnabled();
     scheduleSaveSession();
+    generateBgAssetThumb(asset);
 
     if(kind === 'video'){
       // Probe the real duration asynchronously (independent of the shared
@@ -7988,6 +8032,10 @@ export function createThreeKaleidoscope(){
     if(idx === -1) return;
     const rt = bgRuntime.get(id);
     if(rt){ URL.revokeObjectURL(rt.url); bgRuntime.delete(id); }
+    // Image thumbUrls are object URLs (see generateBgAssetThumb) and need
+    // revoking too; video thumbUrls are data: URLs, safe to just drop.
+    const asset = bgAssets[idx];
+    if(asset.kind === 'image' && asset.thumbUrl) URL.revokeObjectURL(asset.thumbUrl);
     bgAssets.splice(idx, 1);
     if(expandedBgAssetId === id) expandedBgAssetId = null;
     renderBgAssetList();
@@ -8005,6 +8053,9 @@ export function createThreeKaleidoscope(){
   function teardownAllBgAssets(){
     bgRuntime.forEach(function(rt){ URL.revokeObjectURL(rt.url); });
     bgRuntime.clear();
+    bgAssets.forEach(function(a){
+      if(a.kind === 'image' && a.thumbUrl) URL.revokeObjectURL(a.thumbUrl);
+    });
     bgAssets = [];
     expandedBgAssetId = null;
     switchActiveBgAsset(null);
@@ -8144,6 +8195,18 @@ export function createThreeKaleidoscope(){
 
       const head = document.createElement('div');
       head.className = 'bg-asset-row-head';
+
+      if(asset.thumbUrl){
+        const thumb = document.createElement('img');
+        thumb.className = 'bg-asset-thumb';
+        thumb.src = asset.thumbUrl;
+        thumb.alt = '';
+        head.appendChild(thumb);
+      } else {
+        const thumbPlaceholder = document.createElement('span');
+        thumbPlaceholder.className = 'bg-asset-thumb bg-asset-thumb-empty';
+        head.appendChild(thumbPlaceholder);
+      }
 
       const badge = document.createElement('span');
       badge.className = 'bg-asset-kind-badge';
@@ -13393,7 +13456,8 @@ export function createThreeKaleidoscope(){
           file: a.file,
           start: typeof a.start === 'number' ? a.start : 0,
           end: (a.end === null || typeof a.end === 'number') ? a.end : null,
-          settings: Object.assign(makeDefaultBgAssetSettings(), a.settings || {})
+          settings: Object.assign(makeDefaultBgAssetSettings(), a.settings || {}),
+          thumbUrl: null
         };
       });
     } else if(record.bgImageFile){
@@ -13417,7 +13481,8 @@ export function createThreeKaleidoscope(){
           opacity: typeof legacyBg.opacity !== 'undefined' ? parseFloat(legacyBg.opacity) : 1,
           loopEffect: legacyBg.loopEffect === 'fade' ? 'fade' : 'none',
           loopFadeDuration: typeof legacyBg.loopFadeDuration !== 'undefined' ? parseFloat(legacyBg.loopFadeDuration) : 0.5
-        }
+        },
+        thumbUrl: null
       }];
     } else {
       bgAssets = [];
@@ -13426,6 +13491,7 @@ export function createThreeKaleidoscope(){
     renderBgAssetList();
     renderBgAssetTrack();
     updateActiveBgAsset(true);
+    bgAssets.forEach(generateBgAssetThumb);
 
     applyFullPreviewSettings(record.previewSettings || DEFAULT_PREVIEW_SETTINGS);
 
