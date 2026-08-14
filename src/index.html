@@ -8156,7 +8156,24 @@ export function createThreeKaleidoscope(){
   // live decoding <video> per row, which would be wasteful for a list that
   // could hold several video assets. Async either way, so callers re-render
   // the list once thumbUrl is actually set.
-  function generateBgAssetThumb(asset){
+  // applyDefaultVideoDuration (only ever passed `true` right after adding a
+  // brand new video asset - see addBgAssetFromFile) additionally sets the
+  // asset's `end` from its real duration once known. Deliberately NOT the
+  // default: generateBgAssetThumb() is also called when restoring a saved
+  // project's assets, where `end` already holds the user's own saved
+  // placement and must never be overwritten.
+  //
+  // Duration is read here (preload:'auto', on 'loadeddata') rather than in
+  // a separate preload:'metadata'/'loadedmetadata' probe, which used to
+  // live in addBgAssetFromFile - some video files (e.g. MediaRecorder-
+  // produced/streamed webm with no duration in the header) report
+  // `duration: Infinity` at 'loadedmetadata' and only resolve to the real
+  // value once more of the file has actually loaded, which 'loadeddata'
+  // reliably waits for. Using two separate probes meant the thumbnail's
+  // mediaDuration could come out correct while the *placement* silently
+  // kept the Infinity-guarded original default (2s) forever - consolidated
+  // into this one probe so both use the same, working duration read.
+  function generateBgAssetThumb(asset, applyDefaultVideoDuration){
     if(asset.kind === 'image'){
       asset.thumbUrl = URL.createObjectURL(asset.file);
       renderBgAssetList();
@@ -8167,7 +8184,26 @@ export function createThreeKaleidoscope(){
     probe.muted = true;
     probe.src = URL.createObjectURL(asset.file);
     probe.addEventListener('loadeddata', function(){
-      if(probe.duration && isFinite(probe.duration)) asset.mediaDuration = probe.duration;
+      if(probe.duration && isFinite(probe.duration)){
+        asset.mediaDuration = probe.duration;
+        if(applyDefaultVideoDuration){
+          const songDur = waveformDurationSec();
+          let maxEnd = songDur > 0
+            ? asset.start + Math.min(probe.duration, Math.max(0.1, songDur - asset.start))
+            : asset.start + probe.duration;
+          // This resolves asynchronously, after later files in the same
+          // multi-select batch may have already been placed immediately
+          // after this asset's still-provisional (DEFAULT_BG_IMAGE_DURATION_SEC)
+          // end - clamp to whatever asset already claimed the following
+          // slot so the real duration can never retroactively create an
+          // overlap.
+          const neighbors = bgAssetNeighbors(asset);
+          if(neighbors.next) maxEnd = Math.min(maxEnd, neighbors.next.start);
+          asset.end = Math.round(maxEnd * 1000) / 1000;
+          updateSaveEnabled();
+          scheduleSaveSession();
+        }
+      }
       try {
         const cw = 96, ch = 96;
         const vw = probe.videoWidth || 1, vh = probe.videoHeight || 1;
@@ -8195,6 +8231,9 @@ export function createThreeKaleidoscope(){
     const asset = {
       id: genBgAssetId(), kind: kind, file: file,
       start: Math.round(start * 1000) / 1000,
+      // Provisional - for a video this is immediately replaced with its
+      // real duration once generateBgAssetThumb()'s probe resolves (see
+      // applyDefaultVideoDuration above). Images keep this default.
       end: Math.round((start + DEFAULT_BG_IMAGE_DURATION_SEC) * 1000) / 1000,
       settings: makeDefaultBgAssetSettings(),
       thumbUrl: null
@@ -8206,36 +8245,7 @@ export function createThreeKaleidoscope(){
     updateActiveBgAsset(true);
     updateSaveEnabled();
     scheduleSaveSession();
-    generateBgAssetThumb(asset);
-
-    if(kind === 'video'){
-      // Probe the real duration asynchronously (independent of the shared
-      // previewBgVideo element, which may be busy with a different asset)
-      // and default the end to it, clamped to the known song length.
-      const probe = document.createElement('video');
-      probe.preload = 'metadata';
-      probe.src = URL.createObjectURL(file);
-      probe.addEventListener('loadedmetadata', function(){
-        const dur = probe.duration;
-        URL.revokeObjectURL(probe.src);
-        if(!dur || !isFinite(dur)) return;
-        asset.mediaDuration = dur;
-        const songDur = waveformDurationSec();
-        let maxEnd = songDur > 0 ? asset.start + Math.min(dur, Math.max(0.1, songDur - asset.start)) : asset.start + dur;
-        // This resolves asynchronously, after later files in the same
-        // multi-select batch may have already been placed immediately
-        // after this asset's still-provisional (DEFAULT_BG_IMAGE_DURATION_SEC)
-        // end - clamp to whatever asset already claimed the following slot
-        // so the real duration can never retroactively create an overlap.
-        const neighbors = bgAssetNeighbors(asset);
-        if(neighbors.next) maxEnd = Math.min(maxEnd, neighbors.next.start);
-        asset.end = Math.round(maxEnd * 1000) / 1000;
-        renderBgAssetList();
-        renderBgAssetTrack();
-        updateSaveEnabled();
-        scheduleSaveSession();
-      }, { once: true });
-    }
+    generateBgAssetThumb(asset, kind === 'video');
   }
 
   previewBgInput.addEventListener('change', function(e){
@@ -14144,7 +14154,12 @@ export function createThreeKaleidoscope(){
     renderBgAssetList();
     renderBgAssetTrack();
     updateActiveBgAsset(true);
-    bgAssets.forEach(generateBgAssetThumb);
+    // NOT bgAssets.forEach(generateBgAssetThumb) - Array#forEach calls its
+    // callback with (item, index, array), and that index would land in
+    // generateBgAssetThumb's applyDefaultVideoDuration parameter (truthy
+    // for every index >= 1), wrongly overwriting every restored video
+    // asset's saved `end` with a freshly-recomputed default duration.
+    bgAssets.forEach(function(asset){ generateBgAssetThumb(asset); });
 
     applyFullPreviewSettings(record.previewSettings || DEFAULT_PREVIEW_SETTINGS);
 
