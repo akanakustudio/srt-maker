@@ -8173,6 +8173,29 @@ export function createThreeKaleidoscope(){
   // mediaDuration could come out correct while the *placement* silently
   // kept the Infinity-guarded original default (2s) forever - consolidated
   // into this one probe so both use the same, working duration read.
+  // Pushes every asset positioned after `asset` forward, one after another,
+  // just enough to eliminate any overlap with `asset`'s current end -
+  // preserving each pushed asset's own duration, exactly like
+  // reorderBgAsset()'s resequencing. Stops as soon as it reaches an asset
+  // that already starts at or after the current cursor (nothing to fix,
+  // and anything further along is by definition already clear too).
+  // Used when a video's real duration is discovered to be longer than the
+  // provisional slot it was given - see generateBgAssetThumb().
+  function resequenceBgAssetsFrom(asset){
+    const idx = bgAssets.indexOf(asset);
+    if(idx === -1 || asset.end === null) return;
+    let cursor = asset.end;
+    for(let i = idx + 1; i < bgAssets.length; i++){
+      const a = bgAssets[i];
+      if(a.start >= cursor) break;
+      if(a.end === null){ a.start = Math.round(cursor * 1000) / 1000; break; }
+      const duration = a.end - a.start;
+      a.start = Math.round(cursor * 1000) / 1000;
+      a.end = Math.round((cursor + duration) * 1000) / 1000;
+      cursor = a.end;
+    }
+  }
+
   function generateBgAssetThumb(asset, applyDefaultVideoDuration){
     if(asset.kind === 'image'){
       asset.thumbUrl = URL.createObjectURL(asset.file);
@@ -8188,18 +8211,20 @@ export function createThreeKaleidoscope(){
         asset.mediaDuration = probe.duration;
         if(applyDefaultVideoDuration){
           const songDur = waveformDurationSec();
-          let maxEnd = songDur > 0
+          const maxEnd = songDur > 0
             ? asset.start + Math.min(probe.duration, Math.max(0.1, songDur - asset.start))
             : asset.start + probe.duration;
+          asset.end = Math.round(maxEnd * 1000) / 1000;
           // This resolves asynchronously, after later files in the same
           // multi-select batch may have already been placed immediately
           // after this asset's still-provisional (DEFAULT_BG_IMAGE_DURATION_SEC)
-          // end - clamp to whatever asset already claimed the following
-          // slot so the real duration can never retroactively create an
-          // overlap.
-          const neighbors = bgAssetNeighbors(asset);
-          if(neighbors.next) maxEnd = Math.min(maxEnd, neighbors.next.start);
-          asset.end = Math.round(maxEnd * 1000) / 1000;
+          // end - push every asset after this one forward by however much
+          // this one just grew, preserving each of their own durations, so
+          // adding several videos at once gives every single one its real
+          // length instead of only the last-to-resolve one getting it
+          // (earlier ones would otherwise get clamped down to whatever gap
+          // the next-placed asset already occupied).
+          resequenceBgAssetsFrom(asset);
           updateSaveEnabled();
           scheduleSaveSession();
         }
