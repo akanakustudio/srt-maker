@@ -976,10 +976,10 @@
       <div class="preview-stage-outer" id="previewStageOuter">
         <div class="preview-stage" id="previewStage">
           <div class="preview-bg" id="previewBg">
-            <video class="preview-bg-video" id="previewBgVideo" muted loop playsinline style="display:none"></video>
+            <video class="preview-bg-video" id="previewBgVideo" muted playsinline style="display:none"></video>
           </div>
           <div class="preview-bg" id="previewBgB">
-            <video class="preview-bg-video" id="previewBgVideoB" muted loop playsinline style="display:none"></video>
+            <video class="preview-bg-video" id="previewBgVideoB" muted playsinline style="display:none"></video>
           </div>
           <div class="preview-bg-fade-color" id="previewBgFadeColor"></div>
           <canvas class="preview-eq" id="previewEqCanvas"></canvas>
@@ -8005,6 +8005,18 @@ export function createThreeKaleidoscope(){
     if(forceRestart || Math.abs(videoEl.currentTime - safeTarget) > 0.25){
       videoEl.currentTime = safeTarget;
     }
+    // B-6: the <video> elements used to have the native `loop` attribute
+    // (removed - see doc/feature-roadmap.md B-6), which wraps to the
+    // video's own absolute frame 0 on reaching its natural end - wrong
+    // whenever trim.start isn't 0, and able to fire independently of (and
+    // out of sync with) the trim-aware correction above if this per-frame
+    // call is ever delayed (CPU contention, trim.end sitting very close to
+    // the real duration, a background tab, etc.), showing content from
+    // near the actual start of the file until the next correction catches
+    // it. Without `loop`, the browser instead just pauses at the video's
+    // real end in that scenario - resume it here so a stall self-heals
+    // rather than leaving the layer frozen there.
+    if(!audioEl.paused && videoEl.paused) playBgVideoElOnceSeekSettles(videoEl);
   }
   function syncBgVideoToAudio(forceRestart){
     syncBgVideoElementToAudio(primaryVideo, getActiveBgAssetObj(), forceRestart);
