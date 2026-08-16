@@ -9027,6 +9027,31 @@ export function createThreeKaleidoscope(){
         asset.settings.loopFadeDuration = v;
         scheduleSaveSession();
       }));
+
+      // B-6: undoes every start/end-drag trim adjustment at once - resets
+      // the source in/out points to the full untrimmed video AND resizes
+      // the block back to that same natural length (clamped against a
+      // following neighbor, same as a fresh add - see addBgAssetFromFile).
+      const trimResetBtn = document.createElement('button');
+      trimResetBtn.type = 'button';
+      trimResetBtn.className = 'ghost-btn small';
+      trimResetBtn.textContent = 'トリムをリセット';
+      trimResetBtn.title = 'ソース動画のイン/アウト点をトリム前（実尺全体）に戻し、素材ブロックの長さもそれに合わせてリセットします';
+      trimResetBtn.addEventListener('click', function(){
+        asset.settings.videoTrimStart = 0;
+        asset.settings.videoTrimEnd = null;
+        if(asset.mediaDuration){
+          const n = bgAssetNeighbors(asset);
+          const maxEnd = n.next ? n.next.start : Infinity;
+          asset.end = Math.round(Math.min(asset.start + asset.mediaDuration, maxEnd) * 1000) / 1000;
+        }
+        updateSaveEnabled();
+        scheduleSaveSession();
+        if(activeBgAssetId === asset.id) updateActiveBgAsset(true);
+        renderBgAssetList();
+        renderBgAssetTrack();
+      });
+      body.appendChild(trimResetBtn);
     }
 
     const neighbors = bgAssetNeighbors(asset);
@@ -13484,44 +13509,52 @@ export function createThreeKaleidoscope(){
   // neighbor's boundary, no push/cascade) lives here so both the edge-handle
   // drag and the whole-block move drag share one rule.
   //
-  // B-6 (revised three times per user feedback): moving `start`/`end` here
-  // is how a user resizes a video asset's edge on the timeline. Dragging an
-  // edge trims the source in/out point *and* shortens/lengthens the clip by
-  // the same amount - a standard non-destructive-editor trim - UNTIL the
-  // block is already longer than one full trimmed playthrough (a loop-
-  // excess region, drawn hatched by renderBgAssetLoopMarkers). Once a trim
-  // is established it should stay put across ordinary resizes - only once
-  // the requested placed duration would be SHORTER than one full trimmed
-  // playthrough does the trim itself need to shrink to fit; growing (or
-  // shrinking within the existing excess) just changes how much the
-  // already-fixed trimmed span repeats, matching the "video shorter than
-  // its slot loops to fill it" behavior that already exists when there's no
-  // trim at all.
+  // B-6 (revised four times per user feedback): moving `start`/`end` here is
+  // how a user resizes a video asset's edge on the timeline. Two different
+  // situations need two different rules, distinguished by whether a loop-
+  // excess region (hatched by renderBgAssetLoopMarkers) already exists at
+  // the reference point this call is measured from:
+  //   - No excess yet (placed duration <= trim span, e.g. a freshly-added,
+  //     never-trimmed video): dragging an edge trims the source in/out
+  //     point *and* shortens/lengthens the clip by the same amount, a
+  //     standard non-destructive-editor trim - growing reveals more of the
+  //     available source, shrinking trims further, both 1:1 with the drag,
+  //     clamped to what the source actually has ([0, mediaDuration]).
+  //   - An excess already exists (placed duration > trim span): the trim
+  //     stays put across ordinary resizes - only once the requested placed
+  //     duration would dip below one full trimmed playthrough does the trim
+  //     itself shrink to fit; growing (or shrinking within the existing
+  //     excess) just changes how much the already-fixed trimmed span
+  //     repeats.
+  // Using the wrong rule for a given situation was reported twice: revealing
+  // more source unconditionally (rule 1 used everywhere) let a resize INSIDE
+  // an already-hatched region silently shrink the real trim; protecting the
+  // trim unconditionally (rule 2 used everywhere) made growing an edge on a
+  // *freshly trimmed, not-yet-looping* clip refuse to reveal more source at
+  // all (dragging start further left did nothing).
   //
-  // `refTrim` (optional) is the trim to compare/shrink-from - defaults to
-  // reading the *live* trim off `asset.settings`, correct for a single
-  // deliberate commit (typed input, a sync button, one programmatic call).
-  // A drag gesture instead passes a snapshot taken once at pointerdown (see
-  // attachBgAssetHandleDrag) and reuses that SAME snapshot for every
-  // pointermove in the gesture, rather than each call re-reading whatever
-  // the *previous* call just wrote. That distinction matters because a real
-  // pointer drag is never perfectly monotonic - it's a stream of many
-  // per-frame calls with natural micro-jitter, and right at the instant the
-  // requested duration first dips below the span (exactly the boundary a
-  // user dwells on while trying to align an edge to a lyric line), an
-  // incremental live-state read let that single jittery frame nibble the
-  // real trim boundary inward - permanently, since the very next call would
-  // then compare against the now-slightly-smaller span, making it that much
-  // easier for the *next* jitter to nibble further. Repeated over the many
-  // pointermove events in one hesitant/precise drag, that ratcheted the
-  // trim down toward its 0.05s floor - the whole trimmed span collapsing to
-  // a sliver, which reads as "stuck on the trim-start frame" since the
-  // video source only ever advances ~0.05s before wrapping. Comparing
-  // against a fixed drag-start snapshot every time makes each pointermove
-  // a pure function of (drag start, current pointer position) - jitter
-  // moves the edge back and forth exactly like it moves the mouse, with no
-  // memory of intermediate frames to ratchet against.
-  function commitBgAssetTime(asset, field, sec, refTrim){
+  // `ref` (optional) is a snapshot of `{trim, start, end}` to measure this
+  // decision from - defaults to reading the *live* asset/trim state, correct
+  // for a single deliberate commit (typed input, a sync button, one
+  // programmatic call). A drag gesture instead passes a snapshot taken once
+  // at pointerdown (see attachBgAssetHandleDrag) and reuses that SAME
+  // snapshot for every pointermove in the gesture, rather than each call
+  // re-reading whatever the *previous* call just wrote. That distinction
+  // matters because a real pointer drag is never perfectly monotonic - it's
+  // a stream of many per-frame calls with natural micro-jitter, and right at
+  // the instant the requested duration first dips below the span (exactly
+  // the boundary a user dwells on while trying to align an edge to a lyric
+  // line), an incremental live-state read let that single jittery frame
+  // nibble the real trim boundary inward - permanently, since the very next
+  // call would then compare against the now-slightly-smaller span/duration,
+  // making it that much easier for the *next* jitter to nibble further.
+  // Repeated over the many pointermove events in one hesitant/precise drag,
+  // that ratcheted the trim down toward its 0.05s floor. Comparing against a
+  // fixed drag-start snapshot every time makes each pointermove a pure
+  // function of (drag start, current pointer position) - jitter moves the
+  // edge back and forth exactly like it moves the mouse, with no memory of
+  // intermediate frames to ratchet against.
+  function commitBgAssetTime(asset, field, sec, ref){
     const neighbors = bgAssetNeighbors(asset);
     if(field === 'start'){
       const min = neighbors.prev ? (neighbors.prev.end === null ? neighbors.prev.start : neighbors.prev.end) : 0;
@@ -13529,11 +13562,20 @@ export function createThreeKaleidoscope(){
       const newStart = Math.round(clamp(sec, min, max) * 1000) / 1000;
       if(asset.kind === 'video' && asset.mediaDuration && asset.end !== null){
         const dur = asset.mediaDuration;
-        const trim = refTrim || bgAssetVideoTrimRange(asset, dur);
+        const trim = (ref && ref.trim) || bgAssetVideoTrimRange(asset, dur);
+        const refStart = ref ? ref.start : asset.start;
+        const refDuration = asset.end - refStart;
         const newDuration = asset.end - newStart;
-        const newTrimStart = newDuration < trim.span
-          ? clamp(trim.end - newDuration, 0, trim.end - 0.05)
-          : trim.start; // still covers >= one full playthrough - restore to the reference (undoes any shrink from earlier in this same drag)
+        let newTrimStart;
+        if(refDuration <= trim.span){
+          // Not yet looping at the reference point - 1:1 trim reveal/shrink.
+          newTrimStart = clamp(trim.start + (newStart - refStart), 0, trim.end - 0.05);
+        } else {
+          // Already looping - protect the trim unless shrinking past it.
+          newTrimStart = newDuration < trim.span
+            ? clamp(trim.end - newDuration, 0, trim.end - 0.05)
+            : trim.start;
+        }
         asset.settings.videoTrimStart = Math.round(newTrimStart * 1000) / 1000;
       }
       asset.start = newStart;
@@ -13543,11 +13585,18 @@ export function createThreeKaleidoscope(){
       const newEnd = Math.round(clamp(sec, min, max) * 1000) / 1000;
       if(asset.kind === 'video' && asset.mediaDuration){
         const dur = asset.mediaDuration;
-        const trim = refTrim || bgAssetVideoTrimRange(asset, dur);
+        const trim = (ref && ref.trim) || bgAssetVideoTrimRange(asset, dur);
+        const refEnd = ref ? ref.end : asset.end;
+        const refDuration = refEnd === null ? Infinity : refEnd - asset.start;
         const newDuration = newEnd - asset.start;
-        const newTrimEnd = newDuration < trim.span
-          ? clamp(trim.start + newDuration, trim.start + 0.05, dur)
-          : trim.end; // restore to the reference (undoes any shrink from earlier in this same drag)
+        let newTrimEnd;
+        if(refDuration <= trim.span){
+          newTrimEnd = clamp(trim.end + (newEnd - refEnd), trim.start + 0.05, dur);
+        } else {
+          newTrimEnd = newDuration < trim.span
+            ? clamp(trim.start + newDuration, trim.start + 0.05, dur)
+            : trim.end;
+        }
         asset.settings.videoTrimEnd = (dur - newTrimEnd < 0.05) ? null : Math.round(newTrimEnd * 1000) / 1000;
       }
       asset.end = newEnd;
@@ -13562,11 +13611,11 @@ export function createThreeKaleidoscope(){
     // commitBgAssetTime() can compare against a stable reference instead of
     // ratcheting on intra-drag jitter - see the comment on commitBgAssetTime
     // itself for why that matters.
-    let dragStartTrim = null;
+    let dragStartRef = null;
     handleEl.addEventListener('pointerdown', function(ev){
       dragging = true;
-      dragStartTrim = (asset.kind === 'video' && asset.mediaDuration)
-        ? bgAssetVideoTrimRange(asset, asset.mediaDuration)
+      dragStartRef = (asset.kind === 'video' && asset.mediaDuration)
+        ? { trim: bgAssetVideoTrimRange(asset, asset.mediaDuration), start: asset.start, end: asset.end }
         : null;
       handleEl.setPointerCapture(ev.pointerId);
       ev.stopPropagation();
@@ -13576,13 +13625,13 @@ export function createThreeKaleidoscope(){
       const rect = waveScrollArea.getBoundingClientRect();
       const x = ev.clientX - rect.left + waveScrollArea.scrollLeft;
       const rawSec = x / waveZoomPxPerSec;
-      commitBgAssetTime(asset, field, Math.round(rawSec * 100) / 100, dragStartTrim);
+      commitBgAssetTime(asset, field, Math.round(rawSec * 100) / 100, dragStartRef);
       refreshBgAssetBlock(asset);
       refreshBgAssetRowRangeLabel(asset);
       updateActiveBgAsset(true);
     });
     ['pointerup', 'pointercancel'].forEach(function(evName){
-      handleEl.addEventListener(evName, function(){ dragging = false; dragStartTrim = null; });
+      handleEl.addEventListener(evName, function(){ dragging = false; dragStartRef = null; });
     });
   }
 
