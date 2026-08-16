@@ -8146,13 +8146,40 @@ export function createThreeKaleidoscope(){
   // playing if the audio is already playing - rather than always
   // autoplaying immediately on select, which is what left it running out
   // of sync with playback later on.
+  //
+  // B-6 fix: calling .play() in the same tick as setting currentTime races
+  // an in-flight async seek in some browsers - before B-6, the seek
+  // requested here was always to ~0 (a video's own frame 0, since a freshly
+  // loaded element already sits at currentTime 0), which is a no-op seek
+  // that can't race anything. Once a video asset has a non-zero
+  // videoTrimStart, this is the first time this activation path ever
+  // requests a *real* seek away from 0, and playing before that seek
+  // settles let the video start (and keep playing, since the periodic
+  // resync in syncBgVideoElementToAudio only nudges on >0.25s drift rather
+  // than re-issuing the seek) from wherever it already was - i.e. frame 0 -
+  // which is exactly the "start-trim is ignored, video always begins at
+  // 0:00" symptom reported. Deferring play() to the video's own 'seeked'
+  // event (falling back to playing immediately if the seek already settled
+  // synchronously, the common case for small local blob: URLs) fixes this
+  // without adding latency in the case that isn't racy.
+  function playBgVideoElOnceSeekSettles(videoEl){
+    if(audioEl.paused) return;
+    if(videoEl.seeking){
+      videoEl.addEventListener('seeked', function onSeeked(){
+        videoEl.removeEventListener('seeked', onSeeked);
+        if(!audioEl.paused) videoEl.play().catch(function(){});
+      }, { once: true });
+    } else {
+      videoEl.play().catch(function(){});
+    }
+  }
   function activatePrimaryVideo(url){
     primaryVideo.style.display = 'block';
     primaryVideo.src = url;
     primaryVideo.load();
     primaryVideo.addEventListener('loadedmetadata', function(){
       syncBgVideoToAudio(true);
-      if(!audioEl.paused) primaryVideo.play().catch(function(){});
+      playBgVideoElOnceSeekSettles(primaryVideo);
     }, { once: true });
   }
 
@@ -8203,7 +8230,7 @@ export function createThreeKaleidoscope(){
       applyBgOpacityForAsset(asset);
       if(asset.kind === 'video'){
         syncBgVideoToAudio(true);
-        if(!audioEl.paused) primaryVideo.play().catch(function(){});
+        playBgVideoElOnceSeekSettles(primaryVideo);
       }
       return;
     }
@@ -8329,7 +8356,7 @@ export function createThreeKaleidoscope(){
       secondaryVideo.addEventListener('loadedmetadata', function(){
         syncBgVideoElementToAudio(secondaryVideo, asset, true);
         applyBgVideoLayoutFor(secondaryVideo, asset);
-        if(!audioEl.paused) secondaryVideo.play().catch(function(){});
+        playBgVideoElOnceSeekSettles(secondaryVideo);
       }, { once: true });
     } else {
       secondaryBg.style.backgroundImage = 'url(' + rt.url + ')';
