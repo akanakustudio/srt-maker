@@ -109,6 +109,20 @@
   }
   .timecode{font-family:var(--mono);font-size:12px;color:var(--muted);flex:none;min-width:96px;text-align:right;}
 
+  /* Mirrors .seekrow's flex structure (playbtn/seek-wrap/timecode widths) with
+     invisible spacers, so the tick track lines up under the seek input exactly
+     without needing to fight the native range input's own centering/height. */
+  .seek-ticks-row{display:flex;align-items:flex-start;gap:10px;margin:-4px 0 10px;}
+  .seek-ticks-spacer{flex:none;}
+  .seek-ticks-spacer-left{width:38px;}
+  .seek-ticks-spacer-right{min-width:96px;}
+  .seek-ticks{position:relative;flex:1;height:14px;}
+  .seek-tick{position:absolute;top:0;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;}
+  .seek-tick.edge-start{transform:translateX(0);align-items:flex-start;}
+  .seek-tick.edge-end{transform:translateX(-100%);align-items:flex-end;}
+  .seek-tick-mark{width:1px;height:4px;background:var(--line);}
+  .seek-tick-label{font-family:var(--mono);font-size:9px;color:var(--muted2);margin-top:1px;white-space:nowrap;}
+
   .transport-controls{
     display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;
   }
@@ -835,6 +849,7 @@
     #setBtn{width:64px;height:64px;font-size:11px;}
     .tbtn{padding:9px 12px;font-size:12px;}
     .timecode{min-width:78px;font-size:11px;}
+    .seek-ticks-spacer-right{min-width:78px;}
     table{font-size:12px;}
     input.time-input{width:86px;font-size:11.5px;}
     td.time{width:126px;}
@@ -905,11 +920,20 @@
       </div>
       <span class="timecode" id="timeDisplay">00:00.000 / 00:00.000</span>
     </div>
+    <div class="seek-ticks-row">
+      <div class="seek-ticks-spacer seek-ticks-spacer-left"></div>
+      <div class="seek-ticks" id="seekTicks"></div>
+      <div class="seek-ticks-spacer seek-ticks-spacer-right"></div>
+    </div>
     <div class="transport-controls">
       <button class="tbtn" id="setBtnWrap" style="display:none"></button>
       <div id="setBtn" title="押している間、開始〜終了を記録 (スペースキーでも可)">
         <span class="dot"></span>SET
       </div>
+      <button class="tbtn" id="toStartBtn" title="先頭（0:00）から再生">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+        先頭から再生
+      </button>
       <button class="tbtn" id="back5">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2.5 12a9.5 9.5 0 1 1 3 6.9"/><path d="M2.5 6v6h6"/></svg>
         5秒戻る
@@ -1435,6 +1459,9 @@
         <div class="wave-timeline-head">
           <div class="wave-head-left">
             <div class="wave-transport-group" id="waveTransportGroup">
+              <button class="rowbtn" id="waveToStartBtn" title="先頭（0:00）から再生">
+                <svg viewBox="0 0 24 24" fill="currentColor" width="13" height="13"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+              </button>
               <button class="rowbtn" id="waveBackBtn" title="5秒戻る">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M2.5 12a9.5 9.5 0 1 1 3 6.9"/><path d="M2.5 6v6h6"/></svg>
               </button>
@@ -7319,6 +7346,7 @@ export function createThreeKaleidoscope(){
   const seek = document.getElementById('seek');
   const timeDisplay = document.getElementById('timeDisplay');
   const setBtn = document.getElementById('setBtn');
+  const toStartBtn = document.getElementById('toStartBtn');
   const back5 = document.getElementById('back5');
   const fwd5 = document.getElementById('fwd5');
   const currentLineHint = document.getElementById('currentLineHint');
@@ -7342,6 +7370,7 @@ export function createThreeKaleidoscope(){
 
   const waveTimeline = document.getElementById('waveTimeline');
   const waveTimelineHint = document.getElementById('waveTimelineHint');
+  const waveToStartBtn = document.getElementById('waveToStartBtn');
   const waveBackBtn = document.getElementById('waveBackBtn');
   const wavePlayBtn = document.getElementById('wavePlayBtn');
   const wavePlayIcon = document.getElementById('wavePlayIcon');
@@ -11914,21 +11943,6 @@ export function createThreeKaleidoscope(){
 
     resizeEqCanvas();
     const targetRes = getExportResolution();
-    console.log('[srt-maker] 動画出力デバッグ情報', {
-      bgSizeMode: bgSizeModeSelect.value,
-      bgZoom: bgZoomInput.value,
-      bgPosX: bgPosXInput.value,
-      bgPosY: bgPosYInput.value,
-      previewStageClassName: previewStage.className,
-      previewStageRect: previewStage.getBoundingClientRect(),
-      previewEqCanvasSize: { w: previewEqCanvas.width, h: previewEqCanvas.height },
-      exportTargetResolution: targetRes,
-      previewBgImageEl: previewBgImageEl ? {
-        kind: previewBgImageEl instanceof ImageBitmap ? 'ImageBitmap' : 'HTMLImageElement',
-        width: previewBgImageEl instanceof ImageBitmap ? previewBgImageEl.width : previewBgImageEl.naturalWidth,
-        height: previewBgImageEl instanceof ImageBitmap ? previewBgImageEl.height : previewBgImageEl.naturalHeight
-      } : null
-    });
     if(!recordCanvas){
       recordCanvas = document.createElement('canvas');
       recordCtx = recordCanvas.getContext('2d');
@@ -12165,6 +12179,7 @@ export function createThreeKaleidoscope(){
     seek.max = audioEl.duration || 0;
     seek.disabled = false;
     updateTimeDisplay();
+    renderSeekTicks();
   });
 
   audioEl.addEventListener('timeupdate', function(){
@@ -12252,6 +12267,46 @@ export function createThreeKaleidoscope(){
   });
   seek.addEventListener('pointerleave', function(){ seekTooltip.classList.remove('visible'); });
 
+  // C-12: time-grid ticks under the seek bar, at a "nice" interval chosen so
+  // roughly 8 ticks fit regardless of song length (a 3-minute song gets
+  // ~30s ticks, a 20-second clip gets ~2s ticks, etc).
+  const seekTicks = document.getElementById('seekTicks');
+  const SEEK_TICK_NICE_STEPS_SEC = [1,2,5,10,15,30,60,120,300,600,900,1800,3600,7200];
+  function pickSeekTickIntervalSec(durationSec){
+    const rawStep = durationSec / 8;
+    for(let i=0;i<SEEK_TICK_NICE_STEPS_SEC.length;i++){
+      if(rawStep <= SEEK_TICK_NICE_STEPS_SEC[i]) return SEEK_TICK_NICE_STEPS_SEC[i];
+    }
+    return SEEK_TICK_NICE_STEPS_SEC[SEEK_TICK_NICE_STEPS_SEC.length-1];
+  }
+  function fmtSeekTickLabel(sec){
+    const total = Math.round(sec);
+    const h = Math.floor(total/3600), m = Math.floor((total%3600)/60), s = total%60;
+    return h > 0 ? (h+':'+pad(m,2)+':'+pad(s,2)) : (m+':'+pad(s,2));
+  }
+  function renderSeekTicks(){
+    seekTicks.innerHTML = '';
+    const dur = audioEl.duration;
+    if(!dur || !isFinite(dur) || dur <= 0) return;
+    const step = pickSeekTickIntervalSec(dur);
+    for(let t = 0; t <= dur + 0.001; t += step){
+      const frac = clamp(t / dur, 0, 1);
+      const tick = document.createElement('div');
+      tick.className = 'seek-tick';
+      if(frac <= 0.001) tick.classList.add('edge-start');
+      else if(frac >= 0.999) tick.classList.add('edge-end');
+      tick.style.left = (frac * 100) + '%';
+      const mark = document.createElement('div');
+      mark.className = 'seek-tick-mark';
+      const label = document.createElement('div');
+      label.className = 'seek-tick-label';
+      label.textContent = fmtSeekTickLabel(t);
+      tick.appendChild(mark);
+      tick.appendChild(label);
+      seekTicks.appendChild(tick);
+    }
+  }
+
   back5.addEventListener('click', function(){ nudge(-5); });
   fwd5.addEventListener('click', function(){ nudge(5); });
   waveBackBtn.addEventListener('click', function(){ nudge(-5); });
@@ -12259,6 +12314,12 @@ export function createThreeKaleidoscope(){
   function nudge(delta){
     if(!audioEl.src) return;
     audioEl.currentTime = Math.min(Math.max(0, audioEl.currentTime + delta), audioEl.duration || 1e9);
+  }
+  toStartBtn.addEventListener('click', goToStart);
+  waveToStartBtn.addEventListener('click', goToStart);
+  function goToStart(){
+    if(!audioEl.src) return;
+    audioEl.currentTime = 0;
   }
 
   /* ===================== File: lyrics ===================== */
@@ -14288,6 +14349,7 @@ export function createThreeKaleidoscope(){
     seek.max = 0;
     seek.disabled = true;
     updateTimeDisplay();
+    renderSeekTicks();
     resetWaveformPeaks();
     resetAudioTrimFade();
   }
