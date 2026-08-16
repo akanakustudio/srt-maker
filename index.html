@@ -906,6 +906,11 @@
         SRTを開く (.srt)
       </label>
       <input type="file" id="srtInput" accept=".srt,text/plain,application/x-subrip">
+
+      <button class="primary-btn" id="saveBtn" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+        SRTファイルを保存
+      </button>
     </div>
   </header>
 
@@ -1431,10 +1436,6 @@
           <span><span class="swatch" style="background:var(--accent)"></span>対象行</span>
           <span><span class="swatch" style="background:var(--meta)"></span>メタタグ行（保存時に除去）</span>
         </div>
-        <button class="primary-btn" id="saveBtn" disabled>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
-          SRTファイルを保存
-        </button>
       </div>
 
       <div class="table-toolbar">
