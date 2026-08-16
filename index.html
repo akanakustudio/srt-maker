@@ -607,6 +607,26 @@
   }
   .bg-asset-row.expanded .bg-asset-row-body{display:flex;}
 
+  /* B-6: source-video in/out trim, inside the per-asset settings body */
+  .bg-asset-video-trim{width:100%;}
+  .bg-asset-video-trim-label{font-size:11px;color:var(--muted2);margin-bottom:6px;}
+  .bg-asset-video-trim-track{position:relative;height:26px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;}
+  .bg-asset-video-trim-mask{position:absolute;top:0;bottom:0;background:rgba(0,0,0,.55);pointer-events:none;border-radius:3px;}
+  .bg-asset-video-trim-mask.before{left:0;}
+  .bg-asset-video-trim-handle{
+    position:absolute;top:0;bottom:0;width:9px;margin-left:-4px;
+    cursor:ew-resize;z-index:4;touch-action:none;
+  }
+  .bg-asset-video-trim-handle::before{
+    content:"";position:absolute;top:0;bottom:0;left:4px;width:2px;background:var(--rec);
+  }
+  .bg-asset-video-trim-handle::after{
+    content:"";position:absolute;top:0;left:0;width:9px;height:9px;
+    background:var(--rec);clip-path:polygon(0 0,100% 0,50% 100%);
+  }
+  .bg-asset-video-trim-handle:hover::before,.bg-asset-video-trim-handle:hover::after{background:#ff8a5c;}
+  .bg-asset-video-trim-readout{margin-top:5px;font-family:var(--mono);font-size:10.5px;color:var(--muted2);}
+
   .font-style-controls{
     display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 16px;
     border-top:1px dashed var(--line);
@@ -7963,13 +7983,27 @@ export function createThreeKaleidoscope(){
   // already in motion during the crossfade, not a frozen frame fading in -
   // and using the same basis after the swap-to-primary handoff means no
   // rewind/jump at the boundary (see switchActiveBgAsset()'s swap path).
+  // B-6: resolves an asset's settings.videoTrimStart/videoTrimEnd against an
+  // actual known media duration, clamping to a sane range (trimEnd always at
+  // least 0.05s after trimStart) - shared by playback sync and the loop
+  // marker math below so both agree on what "one playthrough" spans.
+  function bgAssetVideoTrimRange(asset, dur){
+    const settings = asset.settings || {};
+    const trimStart = clamp(settings.videoTrimStart || 0, 0, dur);
+    const trimEndRaw = settings.videoTrimEnd;
+    const trimEnd = (trimEndRaw !== null && trimEndRaw !== undefined)
+      ? clamp(trimEndRaw, trimStart + 0.05, dur)
+      : dur;
+    return { start: trimStart, end: trimEnd, span: Math.max(0.05, trimEnd - trimStart) };
+  }
   function syncBgVideoElementToAudio(videoEl, asset, forceRestart){
     if(!asset || asset.kind !== 'video') return;
     const dur = videoEl.duration;
     if(!dur || !isFinite(dur) || dur <= 0) return;
+    const trim = bgAssetVideoTrimRange(asset, dur);
     const basisStart = asset.start - bgAssetPreRollSec(asset);
-    const target = (audioEl.currentTime - basisStart) % dur;
-    const safeTarget = target < 0 ? 0 : target;
+    const target = trim.start + ((audioEl.currentTime - basisStart) % trim.span);
+    const safeTarget = target < trim.start ? trim.start : target;
     if(forceRestart || Math.abs(videoEl.currentTime - safeTarget) > 0.25){
       videoEl.currentTime = safeTarget;
     }
@@ -8317,7 +8351,11 @@ export function createThreeKaleidoscope(){
       // "How this asset hands off to whichever asset immediately follows it"
       // (B-3) - only has a visible effect when the next asset starts exactly
       // where this one ends (no gap); see getBgTransitionState().
-      transitionOut: { type: 'none', duration: 0.6 }
+      transitionOut: { type: 'none', duration: 0.6 },
+      // B-6: which portion of the video FILE ITSELF plays, independent of
+      // where the asset sits on the song timeline (asset.start/end). Only
+      // meaningful for kind:'video'; harmless no-op defaults for images.
+      videoTrimStart: 0, videoTrimEnd: null
     };
   }
   const DEFAULT_BG_IMAGE_DURATION_SEC = 2;
@@ -8731,6 +8769,99 @@ export function createThreeKaleidoscope(){
     });
   }
 
+  // B-6: a small draggable range bar representing the video FILE's own
+  // 0..mediaDuration timeline (distinct from the asset's start/end on the
+  // SONG timeline, which B-2's buildBgAssetTimeField() handles) - lets a
+  // user skip past an unwanted intro or tail in the source file. No frame
+  // thumbnails (unlike a real editor's filmstrip - this app only ever
+  // decodes one static first-frame thumbnail per asset, see
+  // generateBgAssetThumb), just a flat bar with two drag handles, styled
+  // like the waveform's own E-1 trim handles (.wave-trim-handle) for visual
+  // consistency, but positioned by percentage (not px/transform) since this
+  // bar has no scroll/zoom of its own to account for.
+  function refreshBgAssetVideoTrimDom(asset, trackEl){
+    const dur = asset.mediaDuration;
+    if(!dur) return;
+    const trim = bgAssetVideoTrimRange(asset, dur);
+    const startPct = (trim.start / dur) * 100;
+    const endPct = (trim.end / dur) * 100;
+    trackEl.querySelector('.bg-asset-video-trim-handle.start').style.left = startPct + '%';
+    trackEl.querySelector('.bg-asset-video-trim-handle.end').style.left = endPct + '%';
+    trackEl.querySelector('.bg-asset-video-trim-mask.before').style.width = startPct + '%';
+    const maskAfter = trackEl.querySelector('.bg-asset-video-trim-mask.after');
+    maskAfter.style.left = endPct + '%';
+    maskAfter.style.width = Math.max(0, 100 - endPct) + '%';
+    const readout = trackEl.parentElement.querySelector('.bg-asset-video-trim-readout');
+    if(readout){
+      readout.textContent = formatBgTime(trim.start) + ' – ' + formatBgTime(trim.end) +
+        '（実尺 ' + formatBgTime(dur) + '）';
+    }
+  }
+  function attachBgAssetVideoTrimDrag(handleEl, asset, trackEl, isStart){
+    let dragging = false;
+    handleEl.addEventListener('pointerdown', function(ev){
+      dragging = true;
+      handleEl.setPointerCapture(ev.pointerId);
+      ev.stopPropagation();
+    });
+    handleEl.addEventListener('pointermove', function(ev){
+      if(!dragging) return;
+      const dur = asset.mediaDuration;
+      if(!dur) return;
+      const rect = trackEl.getBoundingClientRect();
+      if(!rect.width) return;
+      const sec = clamp(((ev.clientX - rect.left) / rect.width) * dur, 0, dur);
+      const trim = bgAssetVideoTrimRange(asset, dur);
+      if(isStart) asset.settings.videoTrimStart = clamp(sec, 0, trim.end - 0.05);
+      else asset.settings.videoTrimEnd = (dur - sec < 0.05) ? null : clamp(sec, trim.start + 0.05, dur);
+      refreshBgAssetVideoTrimDom(asset, trackEl);
+      refreshBgAssetBlock(asset);
+      if(activeBgAssetId === asset.id) updateActiveBgAsset(true);
+    });
+    ['pointerup', 'pointercancel'].forEach(function(evName){
+      handleEl.addEventListener(evName, function(){
+        if(dragging){ updateSaveEnabled(); scheduleSaveSession(); }
+        dragging = false;
+      });
+    });
+  }
+  function buildBgAssetVideoTrimControl(asset){
+    if(!asset.mediaDuration) return null; // duration probe (generateBgAssetThumb) not resolved yet
+    const wrap = document.createElement('div');
+    wrap.className = 'bg-asset-video-trim';
+    const label = document.createElement('div');
+    label.className = 'bg-asset-video-trim-label';
+    label.textContent = '動画の再生区間（トリミング）';
+    wrap.appendChild(label);
+
+    const track = document.createElement('div');
+    track.className = 'bg-asset-video-trim-track';
+    const maskBefore = document.createElement('div');
+    maskBefore.className = 'bg-asset-video-trim-mask before';
+    const maskAfter = document.createElement('div');
+    maskAfter.className = 'bg-asset-video-trim-mask after';
+    const startHandle = document.createElement('div');
+    startHandle.className = 'bg-asset-video-trim-handle start';
+    startHandle.title = '再生開始位置（ドラッグで調整）';
+    const endHandle = document.createElement('div');
+    endHandle.className = 'bg-asset-video-trim-handle end';
+    endHandle.title = '再生終了位置（ドラッグで調整）';
+    track.appendChild(maskBefore);
+    track.appendChild(maskAfter);
+    track.appendChild(startHandle);
+    track.appendChild(endHandle);
+    wrap.appendChild(track);
+
+    const readout = document.createElement('div');
+    readout.className = 'bg-asset-video-trim-readout';
+    wrap.appendChild(readout);
+
+    attachBgAssetVideoTrimDrag(startHandle, asset, track, true);
+    attachBgAssetVideoTrimDrag(endHandle, asset, track, false);
+    refreshBgAssetVideoTrimDom(asset, track);
+    return wrap;
+  }
+
   function buildBgAssetRowBody(asset){
     const body = document.createElement('div');
     body.className = 'bg-asset-row-body';
@@ -8808,6 +8939,9 @@ export function createThreeKaleidoscope(){
         asset.settings.loopFadeDuration = v;
         scheduleSaveSession();
       }));
+
+      const trimControl = buildBgAssetVideoTrimControl(asset);
+      if(trimControl) body.appendChild(trimControl);
     }
 
     const neighbors = bgAssetNeighbors(asset);
@@ -13155,15 +13289,17 @@ export function createThreeKaleidoscope(){
   }
 
   // Seconds-from-block-start of every point where a video asset's own
-  // playthrough ends and syncBgVideoToAudio() wraps it back to frame 0 (see
-  // that function - it's a plain modulo against the video's own duration).
+  // playthrough ends and syncBgVideoToAudio() wraps it back to its trim-in
+  // point (see that function/bgAssetVideoTrimRange() - it's a plain modulo
+  // against the trimmed span, not necessarily the video's full duration).
   // Empty for images, or for a video asset whose placed duration doesn't
-  // outlast one playthrough.
+  // outlast one playthrough of its (possibly trimmed, B-6) span.
   function bgAssetLoopBoundaries(asset){
     if(asset.kind !== 'video' || !asset.mediaDuration || asset.end === null) return [];
+    const span = bgAssetVideoTrimRange(asset, asset.mediaDuration).span;
     const duration = asset.end - asset.start;
     const boundaries = [];
-    for(let t = asset.mediaDuration; t < duration - 0.02; t += asset.mediaDuration) boundaries.push(t);
+    for(let t = span; t < duration - 0.02; t += span) boundaries.push(t);
     return boundaries;
   }
 
@@ -13181,7 +13317,8 @@ export function createThreeKaleidoscope(){
       overlay.className = 'bg-asset-loop-overlay';
       overlay.style.left = (boundaries[0] * waveZoomPxPerSec) + 'px';
       overlay.style.right = '0';
-      overlay.title = '動画の実尺（' + formatBgTime(asset.mediaDuration) + '）を超えてループ再生される部分';
+      const span = bgAssetVideoTrimRange(asset, asset.mediaDuration).span;
+      overlay.title = '動画の再生区間（' + formatBgTime(span) + '）を超えてループ再生される部分';
       blockEl.appendChild(overlay);
     }
     boundaries.forEach(function(tOffset){
