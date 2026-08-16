@@ -976,10 +976,10 @@
       <div class="preview-stage-outer" id="previewStageOuter">
         <div class="preview-stage" id="previewStage">
           <div class="preview-bg" id="previewBg">
-            <video class="preview-bg-video" id="previewBgVideo" muted loop playsinline style="display:none"></video>
+            <video class="preview-bg-video" id="previewBgVideo" muted playsinline style="display:none"></video>
           </div>
           <div class="preview-bg" id="previewBgB">
-            <video class="preview-bg-video" id="previewBgVideoB" muted loop playsinline style="display:none"></video>
+            <video class="preview-bg-video" id="previewBgVideoB" muted playsinline style="display:none"></video>
           </div>
           <div class="preview-bg-fade-color" id="previewBgFadeColor"></div>
           <canvas class="preview-eq" id="previewEqCanvas"></canvas>
@@ -7886,15 +7886,33 @@ export function createThreeKaleidoscope(){
     bgEl.style.backgroundPosition = s.posX + '% ' + s.posY + '%';
     applyBgVideoLayoutFor(videoEl, asset);
   }
+  // B-7: current in/out-fx state for the primary layer's own asset, or null
+  // outside any window / when B-3 already owns this edge - shared by the
+  // opacity and transform appliers below so both read one consistent
+  // value. Not applied to the secondary/transition-preview layer: whatever
+  // asset it's showing is by definition already being driven by an active
+  // B-3 transition (that's the only reason the secondary layer is ever
+  // used), which already takes priority over this asset's own in/out fx.
+  function primaryBgInOutFx(asset){
+    return getBgTransitionState() ? null : getBgInOutFxState(asset, audioEl.currentTime);
+  }
   function applyBgTransformForAsset(asset){
     applyBgTransformFor(primaryBg, primaryVideo, asset);
+    const fx = primaryBgInOutFx(asset);
+    const blurPx = (fx && fx.blurPx) ? fx.blurPx : 0;
+    const scale = (fx && fx.scale) ? fx.scale : 1;
+    primaryBg.style.filter = blurPx > 0.01 ? 'blur(' + blurPx.toFixed(1) + 'px)' : '';
+    primaryBg.style.transform = Math.abs(scale - 1) > 0.001 ? 'scale(' + scale.toFixed(3) + ')' : '';
   }
 
   function applyBgOpacityFor(bgEl, asset){
     bgEl.style.opacity = asset ? asset.settings.opacity : 1;
   }
   function applyBgOpacityForAsset(asset){
-    applyBgOpacityFor(primaryBg, asset);
+    const baseOpacity = asset ? asset.settings.opacity : 1;
+    const fx = primaryBgInOutFx(asset);
+    const fxOpacity = (fx && fx.opacity != null) ? fx.opacity : 1;
+    primaryBg.style.opacity = baseOpacity * fxOpacity;
   }
 
   function applyBgVisibility(){
@@ -7987,6 +8005,18 @@ export function createThreeKaleidoscope(){
     if(forceRestart || Math.abs(videoEl.currentTime - safeTarget) > 0.25){
       videoEl.currentTime = safeTarget;
     }
+    // B-6: the <video> elements used to have the native `loop` attribute
+    // (removed - see doc/feature-roadmap.md B-6), which wraps to the
+    // video's own absolute frame 0 on reaching its natural end - wrong
+    // whenever trim.start isn't 0, and able to fire independently of (and
+    // out of sync with) the trim-aware correction above if this per-frame
+    // call is ever delayed (CPU contention, trim.end sitting very close to
+    // the real duration, a background tab, etc.), showing content from
+    // near the actual start of the file until the next correction catches
+    // it. Without `loop`, the browser instead just pauses at the video's
+    // real end in that scenario - resume it here so a stall self-heals
+    // rather than leaving the layer frozen there.
+    if(!audioEl.paused && videoEl.paused) playBgVideoElOnceSeekSettles(videoEl);
   }
   function syncBgVideoToAudio(forceRestart){
     syncBgVideoElementToAudio(primaryVideo, getActiveBgAssetObj(), forceRestart);
@@ -8024,19 +8054,33 @@ export function createThreeKaleidoscope(){
       }
       secondaryBg.style.opacity = bgTransitionLayerAlpha(transState.type, transState.progress);
       syncBgTransitionVideoToAudio(forceRestart);
-      if(transState.type === 'fadeBlack' || transState.type === 'fadeWhite'){
-        previewBgFadeColor.style.background = transState.type === 'fadeBlack' ? '#000' : '#fff';
+      const transOverlayColor = BG_FX_OVERLAY_COLOR[transState.type];
+      if(transOverlayColor){
+        previewBgFadeColor.style.background = transOverlayColor;
         previewBgFadeColor.style.opacity = bgTransitionColorAlpha(transState.progress);
       } else {
         previewBgFadeColor.style.opacity = 0;
       }
-    } else {
-      previewBgFadeColor.style.opacity = 0;
     }
 
     const next = getActiveBgAsset();
     if((next ? next.id : null) !== activeBgAssetId) switchActiveBgAsset(next);
     syncBgVideoToAudio(forceRestart);
+
+    // B-7: this asset's own in/out color-flash overlay (fadeBlack/
+    // fadeWhite), mutually exclusive with B-3's own overlay above -
+    // getBgInOutFxState() already suppresses itself whenever B-3 owns this
+    // asset's edge, so there's no risk of both branches fighting over
+    // previewBgFadeColor in the same frame.
+    if(!transState){
+      const fx = getBgInOutFxState(next, audioEl.currentTime);
+      if(fx && fx.colorOverlay){
+        previewBgFadeColor.style.background = fx.colorOverlay;
+        previewBgFadeColor.style.opacity = fx.colorAlpha;
+      } else {
+        previewBgFadeColor.style.opacity = 0;
+      }
+    }
 
     // Only release the secondary/preview layer once switchActiveBgAsset()
     // above has had its chance to consume a matching bgTransitionToAsset
@@ -8051,10 +8095,16 @@ export function createThreeKaleidoscope(){
   }
 
   audioEl.addEventListener('play', function(){
+    // updateActiveBgAsset(true) just force-seeked primaryVideo/secondaryVideo
+    // (syncBgVideoElementToAudio) toward audioEl.currentTime, e.g. the trim
+    // start point when a recording begins - that seek can still be
+    // in-flight, so play() must wait for it to settle rather than racing it
+    // (same bug/fix as playBgVideoElOnceSeekSettles's other call sites; see
+    // commit 91ed5bd - this listener was the one site that fix missed).
     updateActiveBgAsset(true);
     const asset = getActiveBgAssetObj();
-    if(asset && asset.kind === 'video') primaryVideo.play().catch(function(){});
-    if(bgTransitionToAsset && bgTransitionToAsset.kind === 'video') secondaryVideo.play().catch(function(){});
+    if(asset && asset.kind === 'video') playBgVideoElOnceSeekSettles(primaryVideo);
+    if(bgTransitionToAsset && bgTransitionToAsset.kind === 'video') playBgVideoElOnceSeekSettles(secondaryVideo);
   });
   audioEl.addEventListener('pause', function(){
     const asset = getActiveBgAssetObj();
@@ -8092,6 +8142,11 @@ export function createThreeKaleidoscope(){
     const asset = getActiveBgAssetObj();
     if(!asset || asset.kind !== 'video') primaryVideo.style.opacity = '';
     else primaryVideo.style.opacity = getBgVideoLoopAlpha(asset);
+    // B-7: re-applied every frame (not just on activation/settings-change)
+    // so an in/out animation's opacity/blur/zoom ramps smoothly, the same
+    // reasoning as the loop-fade line above.
+    applyBgOpacityForAsset(asset);
+    applyBgTransformForAsset(asset);
     // Driven from this same continuous rAF loop (not just audioEl's
     // timeupdate, which some browsers throttle to ~250ms) so the B-3
     // transition (crossfade/dissolve/fade-color) opacity animates smoothly
@@ -8309,6 +8364,79 @@ export function createThreeKaleidoscope(){
   function bgTransitionColorAlpha(progress){
     return 1 - Math.abs(progress * 2 - 1);
   }
+  // B-7: which solid color a "fade through color" effect type flashes -
+  // shared by B-3's transitionOut (fadeBlack/fadeWhite, hump-shaped via
+  // bgTransitionColorAlpha above) and B-7's own per-asset in/out animation
+  // (fadeBlack/fadeWhite, monotonic ramp via bgInOutFxStyleAt below) so the
+  // two `type === 'fadeBlack' || type === 'fadeWhite'` checks that used to
+  // be hand-duplicated at both the live-preview and canvas-export call
+  // sites collapse to one table lookup each.
+  const BG_FX_OVERLAY_COLOR = { fadeBlack: '#000', fadeWhite: '#fff' };
+
+  // B-7: registry of per-asset entrance/exit animation types. Deliberately
+  // NOT literally shared code with B-3's transition math above - a
+  // transition blends BETWEEN two adjacent layers (alpha humping through
+  // the midpoint, both ends showing "normal" content), while an in/out
+  // animation is single-ended (one asset settling in/out against whatever's
+  // behind it, e.g. fadeBlack ramps monotonically from fully-black to
+  // fully-revealed) - forcing one shared curve shape onto both would be
+  // wrong for one of them. What IS shared is the *pattern* (a small table
+  // keyed by type, each producing a plain style-params object) and the
+  // BG_FX_OVERLAY_COLOR table above.
+  //
+  // progress: 0 = the very start of the effect's own window (not yet
+  // appeared, for "in"; already starting to leave, for "out"), 1 = fully
+  // settled/normal. getBgInOutFxState() below passes 1-progress for the
+  // "out" half so this same function drives both directions.
+  const BG_INOUT_FX_TYPES = {
+    none:      { label: 'オフ' },
+    fadeBlack: { label: 'フェード（暗転）' },
+    fadeWhite: { label: 'フェード（明転）' },
+    dissolve:  { label: 'ディゾルブ' },
+    blur:      { label: 'ぼかし' },
+    zoom:      { label: 'ズーム' }
+  };
+  const BG_INOUT_FX_MAX_BLUR_PX = 24;
+  const BG_INOUT_FX_ZOOM_DELTA = 0.18;
+  function bgInOutFxStyleAt(type, progress){
+    const p = clamp(progress, 0, 1);
+    const overlayColor = BG_FX_OVERLAY_COLOR[type];
+    if(overlayColor) return { opacity: 1, colorOverlay: overlayColor, colorAlpha: 1 - p };
+    if(type === 'dissolve') return { opacity: p };
+    if(type === 'blur') return { opacity: 1, blurPx: (1 - p) * BG_INOUT_FX_MAX_BLUR_PX };
+    if(type === 'zoom') return { opacity: 1, scale: 1 + (1 - p) * BG_INOUT_FX_ZOOM_DELTA };
+    return { opacity: 1 }; // 'none'
+  }
+  // Resolves `asset`'s own in/out animation state at song-time `t`, or null
+  // outside both windows / when B-3 already owns this exact edge. B-3 wins
+  // at a shared boundary (user-confirmed priority, 2026-08-16) -
+  // bgAssetPreRollSec(asset) > 0 means the *previous* asset transitions
+  // into this one (so this asset's own "in" is suppressed), and an
+  // adjacent next asset with its own transitionOut set means *this* asset
+  // transitions out into it (so this asset's own "out" is suppressed).
+  function getBgInOutFxState(asset, t){
+    if(!asset) return null;
+    const animIn = asset.settings.animIn || { type: 'none', duration: 0.6 };
+    const animOut = asset.settings.animOut || { type: 'none', duration: 0.6 };
+    if(animIn.type !== 'none' && bgAssetPreRollSec(asset) === 0){
+      const inDur = Math.max(0.05, animIn.duration || 0.6);
+      if(t < asset.start + inDur){
+        return bgInOutFxStyleAt(animIn.type, clamp((t - asset.start) / inDur, 0, 1));
+      }
+    }
+    if(animOut.type !== 'none' && asset.end !== null){
+      const neighbors = bgAssetNeighbors(asset);
+      const hasOutgoingTransition = bgAssetsAreAdjacent(asset, neighbors.next) &&
+        asset.settings.transitionOut && asset.settings.transitionOut.type !== 'none';
+      if(!hasOutgoingTransition){
+        const outDur = Math.max(0.05, animOut.duration || 0.6);
+        if(t >= asset.end - outDur && t < asset.end){
+          return bgInOutFxStyleAt(animOut.type, clamp((asset.end - t) / outDur, 0, 1));
+        }
+      }
+    }
+    return null;
+  }
 
   // Points the secondary/preview layer at whichever asset is about to
   // become active, reusing the same bgRuntime cache the primary layer uses
@@ -8362,7 +8490,12 @@ export function createThreeKaleidoscope(){
       // B-6: which portion of the video FILE ITSELF plays, independent of
       // where the asset sits on the song timeline (asset.start/end). Only
       // meaningful for kind:'video'; harmless no-op defaults for images.
-      videoTrimStart: 0, videoTrimEnd: null
+      videoTrimStart: 0, videoTrimEnd: null,
+      // B-7: this asset's own entrance/exit animation (independent of B-3's
+      // transitionOut, which only applies at a shared boundary with an
+      // adjacent next asset) - see BG_INOUT_FX_TYPES/getBgInOutFxState().
+      animIn: { type: 'none', duration: 0.6 },
+      animOut: { type: 'none', duration: 0.6 }
     };
   }
   const DEFAULT_BG_IMAGE_DURATION_SEC = 2;
@@ -8832,6 +8965,47 @@ export function createThreeKaleidoscope(){
       scheduleSaveSession();
     }));
 
+    // B-7: per-asset entrance/exit animation - independent of B-3's
+    // transitionOut below (which only fires at a shared boundary with an
+    // adjacent next asset; B-3 wins if both would apply at the same edge,
+    // see getBgInOutFxState()). Applies to images and video alike.
+    function refreshActiveAssetFxLive(){
+      if(activeBgAssetId !== asset.id) return;
+      applyBgOpacityForAsset(asset);
+      applyBgTransformForAsset(asset);
+    }
+    function makeAnimControl(labelText, animKey){
+      const label = document.createElement('label');
+      label.className = 'preview-control';
+      const span = document.createElement('span'); span.textContent = labelText;
+      const select = document.createElement('select');
+      Object.keys(BG_INOUT_FX_TYPES).forEach(function(key){
+        const o = document.createElement('option');
+        o.value = key; o.textContent = BG_INOUT_FX_TYPES[key].label;
+        if(asset.settings[animKey].type === key) o.selected = true;
+        select.appendChild(o);
+      });
+      select.addEventListener('change', function(){
+        asset.settings[animKey].type = select.value;
+        refreshActiveAssetFxLive();
+        scheduleSaveSession();
+      });
+      label.appendChild(span); label.appendChild(select);
+      return label;
+    }
+    body.appendChild(makeAnimControl('登場アニメーション（イン）', 'animIn'));
+    body.appendChild(makeRangeControl('イン時間(秒)', 0.1, 3, 0.1, asset.settings.animIn.duration, function(v){
+      asset.settings.animIn.duration = v;
+      refreshActiveAssetFxLive();
+      scheduleSaveSession();
+    }));
+    body.appendChild(makeAnimControl('退場アニメーション（アウト）', 'animOut'));
+    body.appendChild(makeRangeControl('アウト時間(秒)', 0.1, 3, 0.1, asset.settings.animOut.duration, function(v){
+      asset.settings.animOut.duration = v;
+      refreshActiveAssetFxLive();
+      scheduleSaveSession();
+    }));
+
     if(asset.kind === 'video'){
       const loopLabel = document.createElement('label');
       loopLabel.className = 'preview-control';
@@ -8853,6 +9027,31 @@ export function createThreeKaleidoscope(){
         asset.settings.loopFadeDuration = v;
         scheduleSaveSession();
       }));
+
+      // B-6: undoes every start/end-drag trim adjustment at once - resets
+      // the source in/out points to the full untrimmed video AND resizes
+      // the block back to that same natural length (clamped against a
+      // following neighbor, same as a fresh add - see addBgAssetFromFile).
+      const trimResetBtn = document.createElement('button');
+      trimResetBtn.type = 'button';
+      trimResetBtn.className = 'ghost-btn small';
+      trimResetBtn.textContent = 'トリムをリセット';
+      trimResetBtn.title = 'ソース動画のイン/アウト点をトリム前（実尺全体）に戻し、素材ブロックの長さもそれに合わせてリセットします';
+      trimResetBtn.addEventListener('click', function(){
+        asset.settings.videoTrimStart = 0;
+        asset.settings.videoTrimEnd = null;
+        if(asset.mediaDuration){
+          const n = bgAssetNeighbors(asset);
+          const maxEnd = n.next ? n.next.start : Infinity;
+          asset.end = Math.round(Math.min(asset.start + asset.mediaDuration, maxEnd) * 1000) / 1000;
+        }
+        updateSaveEnabled();
+        scheduleSaveSession();
+        if(activeBgAssetId === asset.id) updateActiveBgAsset(true);
+        renderBgAssetList();
+        renderBgAssetTrack();
+      });
+      body.appendChild(trimResetBtn);
     }
 
     const neighbors = bgAssetNeighbors(asset);
@@ -11662,7 +11861,12 @@ export function createThreeKaleidoscope(){
   // isNaN guard is kept for safety against a hand-edited/older project file.
   // extraAlpha layers on top of the source's own opacity/loop-fade alpha -
   // used by the transition blend below to ramp a source in/out.
-  function drawBgSourceInto(ctx, w, h, scale, source, extraAlpha){
+  // `fx` (B-7) is optional - only ever passed for the primary/"from" source,
+  // since the secondary/"to" source during a B-3 transition is already
+  // covered by `extraAlpha`/its own color-overlay handling in
+  // drawCanvasBackground() and B-3 always takes priority over this asset's
+  // own in/out fx (see getBgInOutFxState()).
+  function drawBgSourceInto(ctx, w, h, scale, source, extraAlpha, fx){
     const s = source.asset.settings;
     const zoomRaw = parseFloat(s.zoom);
     const posXRaw = parseFloat(s.posX);
@@ -11674,11 +11878,25 @@ export function createThreeKaleidoscope(){
       isNaN(posYRaw) ? 50 : posYRaw,
       scale
     );
+    // B-7 zoom fx: inflate the already-computed draw rect around its own
+    // center, same math as a CSS `transform:scale()` around transform-origin
+    // center - keeps this in sync with the live-preview path in
+    // applyBgTransformForAsset().
+    const fxScale = (fx && fx.scale) ? fx.scale : 1;
+    let drawRect = rect;
+    if(Math.abs(fxScale - 1) > 0.001){
+      const newW = rect.w * fxScale, newH = rect.h * fxScale;
+      drawRect = { x: rect.x - (newW - rect.w) / 2, y: rect.y - (newH - rect.h) / 2, w: newW, h: newH };
+    }
     const prevAlpha = ctx.globalAlpha;
+    const prevFilter = ctx.filter;
     const opacityRaw = parseFloat(s.opacity);
     const baseOpacity = isNaN(opacityRaw) ? 1 : opacityRaw;
-    ctx.globalAlpha = prevAlpha * getBgVideoLoopAlpha(source.asset, source.el) * baseOpacity * extraAlpha;
-    ctx.drawImage(source.el, rect.x, rect.y, rect.w, rect.h);
+    const fxOpacity = (fx && fx.opacity != null) ? fx.opacity : 1;
+    ctx.globalAlpha = prevAlpha * getBgVideoLoopAlpha(source.asset, source.el) * baseOpacity * extraAlpha * fxOpacity;
+    if(fx && fx.blurPx > 0.01) ctx.filter = 'blur(' + fx.blurPx.toFixed(1) + 'px)';
+    ctx.drawImage(source.el, drawRect.x, drawRect.y, drawRect.w, drawRect.h);
+    ctx.filter = prevFilter;
     ctx.globalAlpha = prevAlpha;
   }
 
@@ -11691,10 +11909,15 @@ export function createThreeKaleidoscope(){
       return;
     }
     const transState = getBgTransitionState();
-    const fromSource = getBgDrawSourceFor(getActiveBgAsset(), primaryVideo);
+    const activeAsset = getActiveBgAsset();
+    const fromSource = getBgDrawSourceFor(activeAsset, primaryVideo);
+    // B-7: only meaningful for the primary/"from" source, and only outside
+    // an active B-3 transition (which already takes priority) - mirrors
+    // primaryBgInOutFx() on the live-preview side.
+    const fx = transState ? null : getBgInOutFxState(activeAsset, audioEl.currentTime);
     let anyDrawn = false;
     if(fromSource){
-      drawBgSourceInto(ctx, w, h, scale, fromSource, 1);
+      drawBgSourceInto(ctx, w, h, scale, fromSource, 1, fx);
       anyDrawn = true;
     } else if(!transState){
       drawBgPlaceholder(ctx, w, h);
@@ -11711,16 +11934,25 @@ export function createThreeKaleidoscope(){
         drawBgSourceInto(ctx, w, h, scale, toSource, bgTransitionLayerAlpha(transState.type, transState.progress));
         anyDrawn = true;
       }
-      if(transState.type === 'fadeBlack' || transState.type === 'fadeWhite'){
+      const transOverlayColor = BG_FX_OVERLAY_COLOR[transState.type];
+      if(transOverlayColor){
         const colorAlpha = bgTransitionColorAlpha(transState.progress);
         if(colorAlpha > 0){
           const prevAlpha = ctx.globalAlpha;
           ctx.globalAlpha = prevAlpha * colorAlpha;
-          ctx.fillStyle = transState.type === 'fadeBlack' ? '#000' : '#fff';
+          ctx.fillStyle = transOverlayColor;
           ctx.fillRect(0, 0, w, h);
           ctx.globalAlpha = prevAlpha;
         }
       }
+    } else if(fx && fx.colorOverlay && fx.colorAlpha > 0){
+      // B-7: this asset's own in/out color-flash overlay, mirroring the
+      // live-preview path in updateActiveBgAsset().
+      const prevAlpha = ctx.globalAlpha;
+      ctx.globalAlpha = prevAlpha * fx.colorAlpha;
+      ctx.fillStyle = fx.colorOverlay;
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalAlpha = prevAlpha;
     }
 
     if(anyDrawn){
@@ -13277,47 +13509,94 @@ export function createThreeKaleidoscope(){
   // neighbor's boundary, no push/cascade) lives here so both the edge-handle
   // drag and the whole-block move drag share one rule.
   //
-  // B-6 (revised per user feedback): moving `start`/`end` here is how a
-  // user resizes a video asset's edge on the timeline - the very first cut
-  // at this feature added a *separate* source in/out-point control
-  // (independent of placement, looping to fill whatever duration was set),
-  // but that didn't match a standard non-destructive video editor's mental
-  // model: dragging a clip's edge trims its in/out point *and* shortens/
-  // lengthens the clip by the exact same amount, one unified operation with
-  // no independent "loop to fill a longer window" axis for the trimmed
-  // range itself. So every `start`/`end` change here now shifts
-  // videoTrimStart/videoTrimEnd by the identical delta, clamped
-  // independently to the source's own [0, mediaDuration] - as long as
-  // there's still untrimmed source material in that direction, timeline
-  // position and source in/out point move in lockstep (a pure trim, no
-  // loop). Once the trim clamp saturates (fully untrimmed, nothing left to
-  // reveal), the timeline position keeps moving per its own neighbor-
-  // collision clamp while the trim value stays pinned - which is exactly
-  // what naturally reintroduces the pre-existing "placed duration longer
-  // than the source loops to fill it" behavior (bgAssetLoopBoundaries) for
-  // whatever excess follows, without any special-casing here.
-  function commitBgAssetTime(asset, field, sec){
+  // B-6 (revised four times per user feedback): moving `start`/`end` here is
+  // how a user resizes a video asset's edge on the timeline. Two different
+  // situations need two different rules, distinguished by whether a loop-
+  // excess region (hatched by renderBgAssetLoopMarkers) already exists at
+  // the reference point this call is measured from:
+  //   - No excess yet (placed duration <= trim span, e.g. a freshly-added,
+  //     never-trimmed video): dragging an edge trims the source in/out
+  //     point *and* shortens/lengthens the clip by the same amount, a
+  //     standard non-destructive-editor trim - growing reveals more of the
+  //     available source, shrinking trims further, both 1:1 with the drag,
+  //     clamped to what the source actually has ([0, mediaDuration]).
+  //   - An excess already exists (placed duration > trim span): the trim
+  //     stays put across ordinary resizes - only once the requested placed
+  //     duration would dip below one full trimmed playthrough does the trim
+  //     itself shrink to fit; growing (or shrinking within the existing
+  //     excess) just changes how much the already-fixed trimmed span
+  //     repeats.
+  // Using the wrong rule for a given situation was reported twice: revealing
+  // more source unconditionally (rule 1 used everywhere) let a resize INSIDE
+  // an already-hatched region silently shrink the real trim; protecting the
+  // trim unconditionally (rule 2 used everywhere) made growing an edge on a
+  // *freshly trimmed, not-yet-looping* clip refuse to reveal more source at
+  // all (dragging start further left did nothing).
+  //
+  // `ref` (optional) is a snapshot of `{trim, start, end}` to measure this
+  // decision from - defaults to reading the *live* asset/trim state, correct
+  // for a single deliberate commit (typed input, a sync button, one
+  // programmatic call). A drag gesture instead passes a snapshot taken once
+  // at pointerdown (see attachBgAssetHandleDrag) and reuses that SAME
+  // snapshot for every pointermove in the gesture, rather than each call
+  // re-reading whatever the *previous* call just wrote. That distinction
+  // matters because a real pointer drag is never perfectly monotonic - it's
+  // a stream of many per-frame calls with natural micro-jitter, and right at
+  // the instant the requested duration first dips below the span (exactly
+  // the boundary a user dwells on while trying to align an edge to a lyric
+  // line), an incremental live-state read let that single jittery frame
+  // nibble the real trim boundary inward - permanently, since the very next
+  // call would then compare against the now-slightly-smaller span/duration,
+  // making it that much easier for the *next* jitter to nibble further.
+  // Repeated over the many pointermove events in one hesitant/precise drag,
+  // that ratcheted the trim down toward its 0.05s floor. Comparing against a
+  // fixed drag-start snapshot every time makes each pointermove a pure
+  // function of (drag start, current pointer position) - jitter moves the
+  // edge back and forth exactly like it moves the mouse, with no memory of
+  // intermediate frames to ratchet against.
+  function commitBgAssetTime(asset, field, sec, ref){
     const neighbors = bgAssetNeighbors(asset);
     if(field === 'start'){
-      const oldStart = asset.start;
       const min = neighbors.prev ? (neighbors.prev.end === null ? neighbors.prev.start : neighbors.prev.end) : 0;
       const max = asset.end === null ? Infinity : asset.end - 0.1;
       const newStart = Math.round(clamp(sec, min, max) * 1000) / 1000;
-      if(asset.kind === 'video' && asset.mediaDuration){
-        const trim = bgAssetVideoTrimRange(asset, asset.mediaDuration);
-        const newTrimStart = clamp(trim.start + (newStart - oldStart), 0, trim.end - 0.05);
+      if(asset.kind === 'video' && asset.mediaDuration && asset.end !== null){
+        const dur = asset.mediaDuration;
+        const trim = (ref && ref.trim) || bgAssetVideoTrimRange(asset, dur);
+        const refStart = ref ? ref.start : asset.start;
+        const refDuration = asset.end - refStart;
+        const newDuration = asset.end - newStart;
+        let newTrimStart;
+        if(refDuration <= trim.span){
+          // Not yet looping at the reference point - 1:1 trim reveal/shrink.
+          newTrimStart = clamp(trim.start + (newStart - refStart), 0, trim.end - 0.05);
+        } else {
+          // Already looping - protect the trim unless shrinking past it.
+          newTrimStart = newDuration < trim.span
+            ? clamp(trim.end - newDuration, 0, trim.end - 0.05)
+            : trim.start;
+        }
         asset.settings.videoTrimStart = Math.round(newTrimStart * 1000) / 1000;
       }
       asset.start = newStart;
     } else {
-      const oldEnd = asset.end;
       const min = asset.start + 0.1;
       const max = neighbors.next ? neighbors.next.start : Infinity;
       const newEnd = Math.round(clamp(sec, min, max) * 1000) / 1000;
-      if(asset.kind === 'video' && asset.mediaDuration && oldEnd !== null){
+      if(asset.kind === 'video' && asset.mediaDuration){
         const dur = asset.mediaDuration;
-        const trim = bgAssetVideoTrimRange(asset, dur);
-        const newTrimEnd = clamp(trim.end + (newEnd - oldEnd), trim.start + 0.05, dur);
+        const trim = (ref && ref.trim) || bgAssetVideoTrimRange(asset, dur);
+        const refEnd = ref ? ref.end : asset.end;
+        const refDuration = refEnd === null ? Infinity : refEnd - asset.start;
+        const newDuration = newEnd - asset.start;
+        let newTrimEnd;
+        if(refDuration <= trim.span){
+          newTrimEnd = clamp(trim.end + (newEnd - refEnd), trim.start + 0.05, dur);
+        } else {
+          newTrimEnd = newDuration < trim.span
+            ? clamp(trim.start + newDuration, trim.start + 0.05, dur)
+            : trim.end;
+        }
         asset.settings.videoTrimEnd = (dur - newTrimEnd < 0.05) ? null : Math.round(newTrimEnd * 1000) / 1000;
       }
       asset.end = newEnd;
@@ -13328,8 +13607,16 @@ export function createThreeKaleidoscope(){
 
   function attachBgAssetHandleDrag(handleEl, asset, field){
     let dragging = false;
+    // Snapshotted once per drag gesture (not re-read every pointermove) so
+    // commitBgAssetTime() can compare against a stable reference instead of
+    // ratcheting on intra-drag jitter - see the comment on commitBgAssetTime
+    // itself for why that matters.
+    let dragStartRef = null;
     handleEl.addEventListener('pointerdown', function(ev){
       dragging = true;
+      dragStartRef = (asset.kind === 'video' && asset.mediaDuration)
+        ? { trim: bgAssetVideoTrimRange(asset, asset.mediaDuration), start: asset.start, end: asset.end }
+        : null;
       handleEl.setPointerCapture(ev.pointerId);
       ev.stopPropagation();
     });
@@ -13338,13 +13625,13 @@ export function createThreeKaleidoscope(){
       const rect = waveScrollArea.getBoundingClientRect();
       const x = ev.clientX - rect.left + waveScrollArea.scrollLeft;
       const rawSec = x / waveZoomPxPerSec;
-      commitBgAssetTime(asset, field, Math.round(rawSec * 100) / 100);
+      commitBgAssetTime(asset, field, Math.round(rawSec * 100) / 100, dragStartRef);
       refreshBgAssetBlock(asset);
       refreshBgAssetRowRangeLabel(asset);
       updateActiveBgAsset(true);
     });
     ['pointerup', 'pointercancel'].forEach(function(evName){
-      handleEl.addEventListener(evName, function(){ dragging = false; });
+      handleEl.addEventListener(evName, function(){ dragging = false; dragStartRef = null; });
     });
   }
 
