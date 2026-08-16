@@ -13472,48 +13472,56 @@ export function createThreeKaleidoscope(){
   // neighbor's boundary, no push/cascade) lives here so both the edge-handle
   // drag and the whole-block move drag share one rule.
   //
-  // B-6 (revised per user feedback): moving `start`/`end` here is how a
-  // user resizes a video asset's edge on the timeline - the very first cut
-  // at this feature added a *separate* source in/out-point control
-  // (independent of placement, looping to fill whatever duration was set),
-  // but that didn't match a standard non-destructive video editor's mental
-  // model: dragging a clip's edge trims its in/out point *and* shortens/
-  // lengthens the clip by the exact same amount, one unified operation with
-  // no independent "loop to fill a longer window" axis for the trimmed
-  // range itself. So every `start`/`end` change here now shifts
-  // videoTrimStart/videoTrimEnd by the identical delta, clamped
-  // independently to the source's own [0, mediaDuration] - as long as
-  // there's still untrimmed source material in that direction, timeline
-  // position and source in/out point move in lockstep (a pure trim, no
-  // loop). Once the trim clamp saturates (fully untrimmed, nothing left to
-  // reveal), the timeline position keeps moving per its own neighbor-
-  // collision clamp while the trim value stays pinned - which is exactly
-  // what naturally reintroduces the pre-existing "placed duration longer
-  // than the source loops to fill it" behavior (bgAssetLoopBoundaries) for
-  // whatever excess follows, without any special-casing here.
+  // B-6 (revised twice per user feedback): moving `start`/`end` here is how
+  // a user resizes a video asset's edge on the timeline. Dragging an edge
+  // trims the source in/out point *and* shortens/lengthens the clip by the
+  // same amount - a standard non-destructive-editor trim - UNTIL the block
+  // is already longer than one full trimmed playthrough (a loop-excess
+  // region, drawn hatched by renderBgAssetLoopMarkers). A first revision of
+  // this logic shifted videoTrimStart/videoTrimEnd by the raw drag delta
+  // unconditionally, which kept eating into (or extending) the actual trim
+  // even while the drag was entirely within that hatched loop-excess
+  // region - reported as "resizing near the end moves the source's actual
+  // end point" and, as a direct consequence of the loop period shrinking
+  // out from under it, "content near the end of the block shows footage
+  // from near the start" (the loop wrapped earlier than intended). Once a
+  // trim is established it should stay put across ordinary resizes - only
+  // once the requested placed duration would be SHORTER than one full
+  // trimmed playthrough does the trim itself need to shrink to fit;
+  // growing (or shrinking within the existing excess) just changes how
+  // much the already-fixed trimmed span repeats, exactly like the "video
+  // shorter than its slot loops to fill it" behavior already does when
+  // there's no trim at all.
   function commitBgAssetTime(asset, field, sec){
     const neighbors = bgAssetNeighbors(asset);
     if(field === 'start'){
-      const oldStart = asset.start;
       const min = neighbors.prev ? (neighbors.prev.end === null ? neighbors.prev.start : neighbors.prev.end) : 0;
       const max = asset.end === null ? Infinity : asset.end - 0.1;
       const newStart = Math.round(clamp(sec, min, max) * 1000) / 1000;
-      if(asset.kind === 'video' && asset.mediaDuration){
-        const trim = bgAssetVideoTrimRange(asset, asset.mediaDuration);
-        const newTrimStart = clamp(trim.start + (newStart - oldStart), 0, trim.end - 0.05);
-        asset.settings.videoTrimStart = Math.round(newTrimStart * 1000) / 1000;
+      if(asset.kind === 'video' && asset.mediaDuration && asset.end !== null){
+        const dur = asset.mediaDuration;
+        const trim = bgAssetVideoTrimRange(asset, dur);
+        const newDuration = asset.end - newStart;
+        if(newDuration < trim.span){
+          const newTrimStart = clamp(trim.end - newDuration, 0, trim.end - 0.05);
+          asset.settings.videoTrimStart = Math.round(newTrimStart * 1000) / 1000;
+        }
+        // else: still covers >= one full playthrough - leave videoTrimStart
+        // untouched, the resize is entirely within the loop-excess region.
       }
       asset.start = newStart;
     } else {
-      const oldEnd = asset.end;
       const min = asset.start + 0.1;
       const max = neighbors.next ? neighbors.next.start : Infinity;
       const newEnd = Math.round(clamp(sec, min, max) * 1000) / 1000;
-      if(asset.kind === 'video' && asset.mediaDuration && oldEnd !== null){
+      if(asset.kind === 'video' && asset.mediaDuration){
         const dur = asset.mediaDuration;
         const trim = bgAssetVideoTrimRange(asset, dur);
-        const newTrimEnd = clamp(trim.end + (newEnd - oldEnd), trim.start + 0.05, dur);
-        asset.settings.videoTrimEnd = (dur - newTrimEnd < 0.05) ? null : Math.round(newTrimEnd * 1000) / 1000;
+        const newDuration = newEnd - asset.start;
+        if(newDuration < trim.span){
+          const newTrimEnd = clamp(trim.start + newDuration, trim.start + 0.05, dur);
+          asset.settings.videoTrimEnd = (dur - newTrimEnd < 0.05) ? null : Math.round(newTrimEnd * 1000) / 1000;
+        }
       }
       asset.end = newEnd;
     }
