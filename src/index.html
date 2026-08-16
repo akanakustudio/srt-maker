@@ -122,7 +122,7 @@
   }
   .transport-toggle-btn:hover{border-color:var(--accent-dim);color:var(--text);}
   .transport-toggle-btn svg{width:15px;height:15px;transition:transform .15s ease;}
-  .transport.collapsed .transport-toggle-btn svg{transform:rotate(180deg);}
+  .transport:not(.collapsed) .transport-toggle-btn svg{transform:rotate(180deg);}
   .transport.collapsed .seekrow{margin-bottom:0;}
   .transport.collapsed .seek-ticks-row,
   .transport.collapsed .transport-controls,
