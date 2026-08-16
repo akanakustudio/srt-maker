@@ -109,6 +109,26 @@
   }
   .timecode{font-family:var(--mono);font-size:12px;color:var(--muted);flex:none;min-width:96px;text-align:right;}
 
+  /* Collapses everything below the play/seek/timecode row (tick ruler, SET/
+     transport buttons, current-line hint, help text) - those need visual
+     space out of proportion to how often they're actually looked at,
+     especially on a phone screen, while play/seek/scrub stays reachable at
+     all times. State persists across sessions (applyTransportCollapsed()),
+     same convention as the other srt-maker-* localStorage UI prefs. */
+  .transport-toggle-btn{
+    flex:none;width:28px;height:28px;border-radius:7px;
+    border:1px solid var(--line);background:var(--panel2);color:var(--muted);
+    cursor:pointer;display:flex;align-items:center;justify-content:center;
+  }
+  .transport-toggle-btn:hover{border-color:var(--accent-dim);color:var(--text);}
+  .transport-toggle-btn svg{width:15px;height:15px;transition:transform .15s ease;}
+  .transport.collapsed .transport-toggle-btn svg{transform:rotate(180deg);}
+  .transport.collapsed .seekrow{margin-bottom:0;}
+  .transport.collapsed .seek-ticks-row,
+  .transport.collapsed .transport-controls,
+  .transport.collapsed .current-line-hint,
+  .transport.collapsed .help{display:none;}
+
   /* Mirrors .seekrow's flex structure (playbtn/seek-wrap/timecode widths) with
      invisible spacers, so the tick track lines up under the seek input exactly
      without needing to fight the native range input's own centering/height. */
@@ -914,7 +934,7 @@
     </div>
   </header>
 
-  <div class="transport">
+  <div class="transport" id="transportBar">
     <div class="seekrow">
       <button class="playbtn" id="playBtn" title="再生 / 一時停止">
         <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -924,6 +944,9 @@
         <div class="seek-tooltip" id="seekTooltip"></div>
       </div>
       <span class="timecode" id="timeDisplay">00:00.000 / 00:00.000</span>
+      <button class="transport-toggle-btn" id="transportToggleBtn" title="再生コントロールの詳細を折りたたむ">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 15l6-6 6 6"/></svg>
+      </button>
     </div>
     <div class="seek-ticks-row">
       <div class="seek-ticks-spacer seek-ticks-spacer-left"></div>
@@ -7316,6 +7339,36 @@ export function createThreeKaleidoscope(){
       window.addEventListener('resize', sync);
     }
     sync();
+  })();
+
+  // Bottom transport bar collapse/expand (play/seek/timecode always stay
+  // visible; the tick ruler, SET/5秒戻る・進む/先頭から再生, current-line
+  // hint, and help text are what fold away) - persisted globally per-browser
+  // like the other srt-maker-* UI prefs (wave zoom/follow, popup geometry),
+  // not per-project. syncBottomBarHeights()'s ResizeObserver above already
+  // re-measures --transport-h/main's padding automatically whenever
+  // .transport's box height changes, so toggling the class here is enough -
+  // no extra layout bookkeeping needed.
+  const TRANSPORT_COLLAPSED_KEY = 'srt-maker-transport-collapsed';
+  function loadTransportCollapsed(){
+    try { return localStorage.getItem(TRANSPORT_COLLAPSED_KEY) === '1'; } catch(e){ return false; }
+  }
+  function saveTransportCollapsed(collapsed){
+    try { localStorage.setItem(TRANSPORT_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch(e){}
+  }
+  (function initTransportCollapse(){
+    const transportBar = document.getElementById('transportBar');
+    const transportToggleBtn = document.getElementById('transportToggleBtn');
+    function apply(collapsed){
+      transportBar.classList.toggle('collapsed', collapsed);
+      transportToggleBtn.title = collapsed ? '再生コントロールの詳細を表示' : '再生コントロールの詳細を折りたたむ';
+    }
+    apply(loadTransportCollapsed());
+    transportToggleBtn.addEventListener('click', function(){
+      const collapsed = !transportBar.classList.contains('collapsed');
+      apply(collapsed);
+      saveTransportCollapsed(collapsed);
+    });
   })();
 
   const AUDIO_ERROR_MESSAGES = {
