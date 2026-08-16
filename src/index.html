@@ -8083,10 +8083,16 @@ export function createThreeKaleidoscope(){
   }
 
   audioEl.addEventListener('play', function(){
+    // updateActiveBgAsset(true) just force-seeked primaryVideo/secondaryVideo
+    // (syncBgVideoElementToAudio) toward audioEl.currentTime, e.g. the trim
+    // start point when a recording begins - that seek can still be
+    // in-flight, so play() must wait for it to settle rather than racing it
+    // (same bug/fix as playBgVideoElOnceSeekSettles's other call sites; see
+    // commit 91ed5bd - this listener was the one site that fix missed).
     updateActiveBgAsset(true);
     const asset = getActiveBgAssetObj();
-    if(asset && asset.kind === 'video') primaryVideo.play().catch(function(){});
-    if(bgTransitionToAsset && bgTransitionToAsset.kind === 'video') secondaryVideo.play().catch(function(){});
+    if(asset && asset.kind === 'video') playBgVideoElOnceSeekSettles(primaryVideo);
+    if(bgTransitionToAsset && bgTransitionToAsset.kind === 'video') playBgVideoElOnceSeekSettles(secondaryVideo);
   });
   audioEl.addEventListener('pause', function(){
     const asset = getActiveBgAssetObj();
