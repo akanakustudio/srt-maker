@@ -8522,10 +8522,14 @@ export function createThreeKaleidoscope(){
 
     function commit(sec){
       commitBgAssetTime(asset, field, sec);
-      input.value = asset[field] === null ? '' : secToDisplay(asset[field]);
       input.classList.remove('invalid');
+      // Patch in place rather than renderBgAssetList()'s full teardown -
+      // same reasoning as attachBgAssetHandleDrag()'s per-frame updates.
+      // A full rebuild here would replace the ▲/▼ button mid-hold (its
+      // pointerdown target goes stale, so pointerup/stop() never fires on
+      // the new button and the repeat interval never clears).
       refreshBgAssetBlock(asset);
-      renderBgAssetList();
+      refreshBgAssetRowRangeLabel(asset);
       updateActiveBgAsset(true);
     }
 
@@ -8596,7 +8600,46 @@ export function createThreeKaleidoscope(){
     stepper.appendChild(downBtn);
     wrap.appendChild(stepper);
 
-    return wrap;
+    // Same sync/now controls as the lyric table's time cells (renderTable()'s
+    // prevSyncBtn/nowStartBtn/nowEndBtn/syncBtn) - reuses .rowbtn styling and
+    // routes through commit() so clamping/refresh/save match the stepper path.
+    function makeSyncBtn(glyph, title, getSec){
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'rowbtn'; btn.textContent = glyph;
+      btn.title = title;
+      const sec = getSec();
+      if(sec === null) btn.disabled = true;
+      btn.addEventListener('click', function(){
+        const s = getSec();
+        if(s === null) return;
+        commit(s);
+      });
+      return btn;
+    }
+
+    const cell = document.createElement('div');
+    cell.className = 'time-cell-row bg-asset-time-cell-row';
+    if(field === 'start'){
+      cell.appendChild(makeSyncBtn('⇤', '開始時間を前の素材の終了時間に合わせる', function(){
+        const prev = bgAssetNeighbors(asset).prev;
+        return (prev && prev.end !== null) ? prev.end : null;
+      }));
+      cell.appendChild(makeSyncBtn('⏱', '現在の再生位置を開始時間にセット', function(){
+        return audioEl.src ? audioEl.currentTime : null;
+      }));
+      cell.appendChild(wrap);
+    } else {
+      cell.appendChild(wrap);
+      cell.appendChild(makeSyncBtn('⏱', '現在の再生位置を終了時間にセット', function(){
+        return audioEl.src ? audioEl.currentTime : null;
+      }));
+      cell.appendChild(makeSyncBtn('⇥', '終了時間を次の素材の開始時間に合わせる', function(){
+        const next = bgAssetNeighbors(asset).next;
+        return next ? next.start : null;
+      }));
+    }
+
+    return cell;
   }
 
   function buildBgAssetTimeInputs(asset){
