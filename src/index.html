@@ -10490,12 +10490,12 @@ export function createThreeKaleidoscope(){
     if(ctx) ctx.clearRect(0, 0, previewEqCanvas.width, previewEqCanvas.height);
   }
 
-  previewEqToggle.addEventListener('click', function(){
-    if(!eqEnabled && !audioEl.src){
-      setStatus('先に音源ファイルを開いてください', 'err');
-      return;
-    }
-    eqEnabled = !eqEnabled;
+  // Shared by the toggle button and project/style restore (persists the
+  // EQ on/off state alongside eqStyle) - silently stays off when there's no
+  // audio loaded yet rather than erroring, since restore can run before the
+  // user has picked an audio file.
+  function setEqEnabled(enabled){
+    eqEnabled = !!enabled && !!audioEl.src;
     previewEqToggle.classList.toggle('active', eqEnabled);
     if(eqEnabled){
       ensureAudioGraph();
@@ -10505,6 +10505,14 @@ export function createThreeKaleidoscope(){
     } else {
       stopEq();
     }
+  }
+
+  previewEqToggle.addEventListener('click', function(){
+    if(!eqEnabled && !audioEl.src){
+      setStatus('先に音源ファイルを開いてください', 'err');
+      return;
+    }
+    setEqEnabled(!eqEnabled);
   });
 
   window.addEventListener('resize', function(){
@@ -11652,6 +11660,7 @@ export function createThreeKaleidoscope(){
       },
       highlightMode: previewAll.classList.contains('highlight-text-only') ? 'text' : 'line',
       eq: eqStyle,
+      eqEnabled: eqEnabled,
       panelState: getPanelState()
     };
   }
@@ -11773,6 +11782,7 @@ export function createThreeKaleidoscope(){
     applyBgVisibility();
 
     setEqStyle(sanitizeEqStyle(obj.eq));
+    setEqEnabled(!!obj.eqEnabled);
 
     applyPanelState(obj.panelState);
   }
