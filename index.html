@@ -10490,12 +10490,12 @@ export function createThreeKaleidoscope(){
     if(ctx) ctx.clearRect(0, 0, previewEqCanvas.width, previewEqCanvas.height);
   }
 
-  previewEqToggle.addEventListener('click', function(){
-    if(!eqEnabled && !audioEl.src){
-      setStatus('先に音源ファイルを開いてください', 'err');
-      return;
-    }
-    eqEnabled = !eqEnabled;
+  // Shared by the toggle button and project/style restore (persists the
+  // EQ on/off state alongside eqStyle) - silently stays off when there's no
+  // audio loaded yet rather than erroring, since restore can run before the
+  // user has picked an audio file.
+  function setEqEnabled(enabled){
+    eqEnabled = !!enabled && !!audioEl.src;
     previewEqToggle.classList.toggle('active', eqEnabled);
     if(eqEnabled){
       ensureAudioGraph();
@@ -10505,6 +10505,14 @@ export function createThreeKaleidoscope(){
     } else {
       stopEq();
     }
+  }
+
+  previewEqToggle.addEventListener('click', function(){
+    if(!eqEnabled && !audioEl.src){
+      setStatus('先に音源ファイルを開いてください', 'err');
+      return;
+    }
+    setEqEnabled(!eqEnabled);
   });
 
   window.addEventListener('resize', function(){
@@ -11652,6 +11660,7 @@ export function createThreeKaleidoscope(){
       },
       highlightMode: previewAll.classList.contains('highlight-text-only') ? 'text' : 'line',
       eq: eqStyle,
+      eqEnabled: eqEnabled,
       panelState: getPanelState()
     };
   }
@@ -11773,6 +11782,7 @@ export function createThreeKaleidoscope(){
     applyBgVisibility();
 
     setEqStyle(sanitizeEqStyle(obj.eq));
+    setEqEnabled(!!obj.eqEnabled);
 
     applyPanelState(obj.panelState);
   }
@@ -11854,7 +11864,24 @@ export function createThreeKaleidoscope(){
         : clamp(parseInt(customFontSizeAllInput.value, 10) || 14, 8, 120);
     }
     if(mode === 'single'){
-      return parseFloat(getComputedStyle(previewSingleText).fontSize) || 32;
+      // previewSingleText carries an `is-empty` class (CSS-overrides font-size
+      // to a fixed 15px placeholder) whenever the on-screen preview hasn't
+      // caught up to the currently active line yet - that sync only runs off
+      // the audio element's `timeupdate` event, which can lag several
+      // requestAnimationFrame ticks behind drawExportFrame's own (rAF-driven)
+      // activeIdx computation. This is only ever called once the caller
+      // already knows real text is about to be drawn, so a lingering
+      // `is-empty` here is stale/irrelevant - reading it as-is bakes a
+      // "starts at 15px, then jumps to the configured size" flash into every
+      // exported video, at the start of every line preceded by a gap.
+      // Measure with `is-empty` removed (synchronously, before any paint
+      // happens, so nothing flickers on screen) to get the size the line
+      // will actually render at once the preview catches up.
+      const wasEmpty = previewSingleText.classList.contains('is-empty');
+      if(wasEmpty) previewSingleText.classList.remove('is-empty');
+      const size = parseFloat(getComputedStyle(previewSingleText).fontSize) || 32;
+      if(wasEmpty) previewSingleText.classList.add('is-empty');
+      return size;
     }
     const raw = getComputedStyle(previewPanel).getPropertyValue('--preview-all-size').trim();
     return parseFloat(raw) || 14;
@@ -12167,6 +12194,19 @@ export function createThreeKaleidoscope(){
   // landscape 720p = 1280x720 (height=720), portrait 720p = 720x1280 (width=720).
   const EXPORT_SHORT_EDGE = { '720p': 720, '1080p': 1080, '4k': 2160 };
 
+  // MediaRecorder falls back to a flat, browser-chosen default bitrate
+  // (commonly a couple Mbps) when videoBitsPerSecond isn't specified -
+  // nowhere near enough once the canvas is 1080p/4K, which reads as heavy
+  // blocking/blur on fine detail like text edges ("poor quality" exports).
+  // ~0.12 bit/pixel/frame lands in the "visually near-lossless" range for
+  // H.264/VP9 text+graphics content and scales with resolution/framerate
+  // instead of staying flat.
+  function estimateExportVideoBitrate(w, h, fps){
+    const bitsPerPixelPerFrame = 0.12;
+    const bps = w * h * fps * bitsPerPixelPerFrame;
+    return Math.round(clamp(bps, 4000000, 60000000));
+  }
+
   function getExportResolution(){
     const shortEdge = EXPORT_SHORT_EDGE[exportResolutionSelect.value] || 720;
     // Vertical/horizontal ratio mode locks the stage to an exact 9:16 / 16:9 box,
@@ -12309,9 +12349,14 @@ export function createThreeKaleidoscope(){
     const isMp4 = recordMimeType.indexOf('mp4') !== -1;
     const fileExt = isMp4 ? 'mp4' : 'webm';
 
+    const videoBitsPerSecond = estimateExportVideoBitrate(targetRes.w, targetRes.h, fps);
+    const recorderOpts = recordMimeType
+      ? {mimeType: recordMimeType, videoBitsPerSecond: videoBitsPerSecond}
+      : {videoBitsPerSecond: videoBitsPerSecond};
+
     recordedChunks = [];
     try{
-      mediaRecorder = recordMimeType ? new MediaRecorder(combined, {mimeType: recordMimeType}) : new MediaRecorder(combined);
+      mediaRecorder = new MediaRecorder(combined, recorderOpts);
     } catch(err){
       setStatus('動画の録画を開始できませんでした: ' + err.message, 'err');
       return;
