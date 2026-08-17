@@ -852,6 +852,7 @@
   }
   .ghost-btn:hover{border-color:var(--accent-dim);color:var(--text);}
   .ghost-btn.active{background:var(--accent-dim);border-color:var(--accent);color:#eafffb;}
+  .ghost-btn.danger:hover{border-color:var(--danger);color:var(--danger);}
 
   /* ---------- Tablet ---------- */
   @media (min-width:641px) and (max-width:1179px){
@@ -925,7 +926,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z"/><path d="M14 3v4a1 1 0 001 1h4"/><path d="M8 14l1.5 4L11 14l1.5 4L14 14"/></svg>
         SRTを開く (.srt)
       </label>
-      <input type="file" id="srtInput" accept=".srt,text/plain,application/x-subrip">
+      <input type="file" id="srtInput" accept=".srt,text/plain,application/x-subrip,text/*">
 
       <button class="primary-btn" id="saveBtn" disabled>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
@@ -1476,6 +1477,7 @@
           </span>
         </span>
         <button class="ghost-btn small" id="textEditToggleBtn">テキストで編集</button>
+        <button class="ghost-btn small danger" id="clearAllLinesBtn" title="歌詞タイムテーブルの全行を削除します">全行クリア</button>
         <span class="hint" id="selectedCountHint"></span>
       </div>
 
@@ -7409,6 +7411,7 @@ export function createThreeKaleidoscope(){
   const emptyState = document.getElementById('emptyState');
   const lineCount = document.getElementById('lineCount');
   const addLineBtn = document.getElementById('addLineBtn');
+  const clearAllLinesBtn = document.getElementById('clearAllLinesBtn');
   const saveBtn = document.getElementById('saveBtn');
   const statusEl = document.getElementById('status');
   const selectAllCheckbox = document.getElementById('selectAllCheckbox');
@@ -14446,6 +14449,32 @@ export function createThreeKaleidoscope(){
     lyricsLines.push({id: uid++, text: '', isMeta:false, isBlank:true, start:null, end:null});
     if(currentIndex === -1) currentIndex = firstTimeableIndex(0);
     renderTable();
+  });
+
+  // Irreversible (no undo/history anywhere in this app - see scheduleSaveSession(),
+  // which overwrites the persisted project record) and higher-blast-radius than
+  // the other confirm()-gated destructive actions in this file (single background
+  // asset delete, whole-project delete), since it wipes every timed line at once -
+  // so this one deliberately requires typing the literal word "削除" rather than
+  // just clicking through a plain confirm() dialog, making an accidental double-tap
+  // or muscle-memory "OK" click insufficient to trigger it.
+  clearAllLinesBtn.addEventListener('click', function(){
+    if(!lyricsLines.length) return;
+    const typed = window.prompt(
+      '歌詞タイムテーブルの全' + lyricsLines.length + '行を削除します。この操作は元に戻せません。\n' +
+      '実行するには「削除」と入力してください。'
+    );
+    if(typed === null) return; // cancelled
+    if(typed !== '削除'){
+      setStatus('入力が「削除」と一致しなかったため、全行クリアを中止しました', 'err');
+      return;
+    }
+    lyricsLines = [];
+    selectedIds.clear();
+    currentIndex = -1;
+    renderTable();
+    scheduleSaveSession();
+    setStatus('歌詞タイムテーブルの全行をクリアしました', 'ok');
   });
 
   function updateCurrentLineHint(){
