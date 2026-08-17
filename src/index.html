@@ -11864,7 +11864,24 @@ export function createThreeKaleidoscope(){
         : clamp(parseInt(customFontSizeAllInput.value, 10) || 14, 8, 120);
     }
     if(mode === 'single'){
-      return parseFloat(getComputedStyle(previewSingleText).fontSize) || 32;
+      // previewSingleText carries an `is-empty` class (CSS-overrides font-size
+      // to a fixed 15px placeholder) whenever the on-screen preview hasn't
+      // caught up to the currently active line yet - that sync only runs off
+      // the audio element's `timeupdate` event, which can lag several
+      // requestAnimationFrame ticks behind drawExportFrame's own (rAF-driven)
+      // activeIdx computation. This is only ever called once the caller
+      // already knows real text is about to be drawn, so a lingering
+      // `is-empty` here is stale/irrelevant - reading it as-is bakes a
+      // "starts at 15px, then jumps to the configured size" flash into every
+      // exported video, at the start of every line preceded by a gap.
+      // Measure with `is-empty` removed (synchronously, before any paint
+      // happens, so nothing flickers on screen) to get the size the line
+      // will actually render at once the preview catches up.
+      const wasEmpty = previewSingleText.classList.contains('is-empty');
+      if(wasEmpty) previewSingleText.classList.remove('is-empty');
+      const size = parseFloat(getComputedStyle(previewSingleText).fontSize) || 32;
+      if(wasEmpty) previewSingleText.classList.add('is-empty');
+      return size;
     }
     const raw = getComputedStyle(previewPanel).getPropertyValue('--preview-all-size').trim();
     return parseFloat(raw) || 14;
